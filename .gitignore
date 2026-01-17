@@ -1,2 +1,6 @@
 **/xcuserdata/
 **/*.xcuserstate
+build/
+.env
+
+.env
