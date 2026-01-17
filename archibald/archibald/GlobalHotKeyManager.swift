@@ -26,7 +26,7 @@ final class GlobalHotKeyManager {
         register(
             hotKey: &hideHotKey,
             keyCode: UInt32(kVK_ANSI_Backslash),
-            modifiers: UInt32(shiftKey | cmdKey),
+            modifiers: UInt32(cmdKey | optionKey),
             id: 2
         )
         isRunning = true
