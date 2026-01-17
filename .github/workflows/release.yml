@@ -9,7 +9,7 @@ jobs:
   build-and-release:
     runs-on: macos-latest
     env:
-      KEYCHAIN_PATH: ${{ runner.temp }}/build.keychain-db
+      KEYCHAIN_PATH: ${{ github.workspace }}/build.keychain-db
 
     steps:
       - name: Checkout
