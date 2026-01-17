@@ -17,8 +17,9 @@ final class OrbWindowController {
       .nonactivatingPanel,
     ]
 
+    let outerSize = OrbLayout.outerSize(orbSize: settings.orbSize)
     panel = NSPanel(
-      contentRect: NSRect(x: 0, y: 0, width: settings.orbSize, height: settings.orbSize),
+      contentRect: NSRect(x: 0, y: 0, width: outerSize, height: outerSize),
       styleMask: styleMask,
       backing: .buffered,
       defer: false
@@ -30,7 +31,7 @@ final class OrbWindowController {
     panel.backgroundColor = .clear
     panel.isOpaque = false
     panel.hasShadow = false
-    panel.level = .floating
+    panel.level = .normal
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.titleVisibility = .hidden
     panel.titlebarAppearsTransparent = true
@@ -41,7 +42,10 @@ final class OrbWindowController {
     let rootView = OrbView()
       .environmentObject(settings)
       .environmentObject(voiceSession)
-    panel.contentView = NSHostingView(rootView: rootView)
+    let hostingView = NSHostingView(rootView: rootView)
+    hostingView.wantsLayer = true
+    hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+    panel.contentView = hostingView
 
     updateFrame()
     bindSettings()
@@ -49,10 +53,15 @@ final class OrbWindowController {
 
   func setVisible(_ isVisible: Bool) {
     if isVisible {
-      panel.orderFrontRegardless()
+      bringToFront()
     } else {
       panel.orderOut(nil)
     }
+  }
+
+  func bringToFront() {
+    NSApp.activate(ignoringOtherApps: true)
+    panel.orderFrontRegardless()
   }
 
   private func bindSettings() {
@@ -75,8 +84,8 @@ final class OrbWindowController {
   private func updateFrame() {
     guard let screen = NSScreen.main?.visibleFrame else { return }
 
-    let size = settings.orbSize
-    let padding: CGFloat = 16
+    let size = OrbLayout.outerSize(orbSize: settings.orbSize)
+    let padding: CGFloat = 0
     let origin: CGPoint
 
     switch settings.corner {

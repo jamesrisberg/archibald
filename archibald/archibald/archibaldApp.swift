@@ -24,22 +24,75 @@ struct archibaldApp: App {
 
   var body: some Scene {
     MenuBarExtra("Archibald", systemImage: "sparkles") {
-      Button(settings.isOrbVisible ? "Hide Orb" : "Show Orb") {
-        settings.isOrbVisible.toggle()
+      VStack(spacing: 10) {
+        HStack(spacing: 8) {
+          Image(systemName: "sparkles")
+            .foregroundStyle(.secondary)
+          Text("Archibald")
+            .font(.headline)
+          Spacer()
+          Text(settings.isListening ? "Listening" : "Idle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        MenuActionButton(
+          title: settings.isOrbVisible ? "Hide Orb" : "Show Orb",
+          systemImage: settings.isOrbVisible ? "eye.slash" : "eye",
+          action: { settings.isOrbVisible.toggle() }
+        )
+
+        MenuActionButton(
+          title: settings.isListening ? "Stop Listening" : "Start Listening",
+          systemImage: settings.isListening ? "stop.circle" : "mic.circle",
+          action: { settings.isListening.toggle() }
+        )
+
+        Divider()
+          .overlay(Color.white.opacity(0.15))
+
+        SettingsLink {
+          MenuActionRow(
+            title: "Settings",
+            systemImage: "slider.horizontal.3"
+          )
+        }
+        .buttonStyle(.plain)
+
+        Divider()
+          .overlay(Color.white.opacity(0.15))
+
+        MenuActionButton(
+          title: "Quit Archibald",
+          systemImage: "power",
+          role: .destructive,
+          action: { NSApplication.shared.terminate(nil) }
+        )
       }
-      Button(settings.isListening ? "Stop Listening" : "Start Listening") {
-        settings.isListening.toggle()
-      }
-      Divider()
-      SettingsLink {
-        Text("Settings…")
-      }
-      Divider()
-      Button("Quit Archibald") {
-        NSApplication.shared.terminate(nil)
-      }
+      .padding(12)
+      .frame(minWidth: 240)
+      .background(.ultraThinMaterial)
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(Color.white.opacity(0.12), lineWidth: 1)
+      )
     }
     .menuBarExtraStyle(.window)
+    .commands {
+      CommandMenu("Archibald") {
+        Button("Show/Toggle Listening") {
+          handlePrimaryShortcut()
+        }
+        .keyboardShortcut("\\", modifiers: [.shift])
+
+        Button("Hide Orb") {
+          settings.isOrbVisible = false
+          settings.isListening = false
+        }
+        .keyboardShortcut("\\", modifiers: [.command, .shift])
+      }
+    }
     Settings {
       SettingsView()
         .environmentObject(settings)
@@ -47,3 +100,15 @@ struct archibaldApp: App {
     }
   }
 }
+
+extension archibaldApp {
+  private func handlePrimaryShortcut() {
+    if !settings.isOrbVisible {
+      settings.isOrbVisible = true
+      settings.isListening = true
+      return
+    }
+    settings.isListening.toggle()
+  }
+}
+

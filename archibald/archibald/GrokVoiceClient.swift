@@ -26,11 +26,9 @@ struct GrokSessionConfig: Codable {
 }
 
 final class GrokVoiceClient {
-  private let tokenEndpoint: URL
   let sessionEndpoint: URL
 
-  init(tokenEndpoint: URL, sessionEndpoint: URL = URL(string: "wss://api.x.ai/v1/realtime")!) {
-    self.tokenEndpoint = tokenEndpoint
+  init(sessionEndpoint: URL = URL(string: "wss://api.x.ai/v1/realtime")!) {
     self.sessionEndpoint = sessionEndpoint
   }
 
@@ -77,38 +75,23 @@ final class GrokVoiceClient {
     )
   }
 
-  func fetchEphemeralToken() async throws -> String {
-    var request = URLRequest(url: tokenEndpoint)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-    logHttpRequest("POST", url: tokenEndpoint, body: request.httpBody)
-    let (data, response) = try await URLSession.shared.data(for: request)
-    logHttpResponse(response, data: data)
-    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    if let token = json?["client_secret"] as? String {
-      return token
-    }
-    throw URLError(.badServerResponse)
-  }
-
   private func logHttpRequest(_ method: String, url: URL, body: Data?) {
-    NSLog("[Grok HTTP OUT] \(method) \(url.absoluteString)")
+    DebugLog.log("[Grok HTTP OUT] \(method) \(url.absoluteString)")
     if let body, let bodyString = String(data: body, encoding: .utf8) {
-      NSLog("[Grok HTTP OUT] Body \(bodyString)")
+      DebugLog.log("[Grok HTTP OUT] Body \(bodyString)")
     }
   }
 
   private func logHttpResponse(_ response: URLResponse, data: Data) {
     if let http = response as? HTTPURLResponse {
-      NSLog("[Grok HTTP IN] Status \(http.statusCode)")
+      DebugLog.log("[Grok HTTP IN] Status \(http.statusCode)")
     } else {
-      NSLog("[Grok HTTP IN] Response \(response)")
+      DebugLog.log("[Grok HTTP IN] Response \(response)")
     }
     if let body = String(data: data, encoding: .utf8) {
       let maxLength = 1200
       let truncated = body.count > maxLength ? String(body.prefix(maxLength)) + "…<truncated>" : body
-      NSLog("[Grok HTTP IN] Body \(truncated)")
+      DebugLog.log("[Grok HTTP IN] Body \(truncated)")
     }
   }
 }

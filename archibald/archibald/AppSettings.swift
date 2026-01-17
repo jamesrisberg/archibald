@@ -31,6 +31,26 @@ final class AppSettings: ObservableObject {
     var id: String { rawValue }
   }
 
+  enum HotKeyOption: String, CaseIterable, Identifiable {
+    case optionBackslash
+    case shiftBackslash
+    case optionSpace
+    case controlSpace
+    case commandShiftSpace
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .optionBackslash: return "Option + \\"
+      case .shiftBackslash: return "Shift + \\"
+      case .optionSpace: return "Option + Space"
+      case .controlSpace: return "Control + Space"
+      case .commandShiftSpace: return "Command + Shift + Space"
+      }
+    }
+  }
+
   private enum Keys {
     static let corner = "orb.corner"
     static let orbSize = "orb.size"
@@ -38,9 +58,10 @@ final class AppSettings: ObservableObject {
     static let isListening = "orb.listening"
     static let voice = "voice.selected"
     static let systemPrompt = "voice.systemPrompt"
-    static let tokenEndpoint = "voice.tokenEndpoint"
     static let apiKey = "voice.apiKey"
+    static let debugLogging = "debug.logging"
     static let inboxFolderPath = "context.inboxFolderPath"
+    static let primaryHotKey = "hotkey.primary"
   }
 
   private let defaults: UserDefaults
@@ -69,16 +90,23 @@ final class AppSettings: ObservableObject {
     didSet { defaults.set(systemPrompt, forKey: Keys.systemPrompt) }
   }
 
-  @Published var tokenEndpoint: String {
-    didSet { defaults.set(tokenEndpoint, forKey: Keys.tokenEndpoint) }
-  }
-
   @Published var apiKey: String {
     didSet { defaults.set(apiKey, forKey: Keys.apiKey) }
   }
 
+  @Published var debugLogging: Bool {
+    didSet {
+      defaults.set(debugLogging, forKey: Keys.debugLogging)
+      DebugLog.isEnabled = debugLogging
+    }
+  }
+
   @Published var inboxFolderPath: String {
     didSet { defaults.set(inboxFolderPath, forKey: Keys.inboxFolderPath) }
+  }
+
+  @Published var primaryHotKey: HotKeyOption {
+    didSet { defaults.set(primaryHotKey.rawValue, forKey: Keys.primaryHotKey) }
   }
 
   init(defaults: UserDefaults = .standard) {
@@ -100,12 +128,15 @@ final class AppSettings: ObservableObject {
       defaults.string(forKey: Keys.systemPrompt)
       ?? "You are Archibald, a concise desktop assistant."
 
-    tokenEndpoint =
-      defaults.string(forKey: Keys.tokenEndpoint)
-      ?? "http://localhost:8081/session"
-
     apiKey = defaults.string(forKey: Keys.apiKey) ?? ""
 
+    debugLogging = defaults.object(forKey: Keys.debugLogging) as? Bool ?? true
+
     inboxFolderPath = defaults.string(forKey: Keys.inboxFolderPath) ?? ""
+
+    let savedHotKey = defaults.string(forKey: Keys.primaryHotKey)
+      ?? HotKeyOption.optionBackslash.rawValue
+    primaryHotKey = HotKeyOption(rawValue: savedHotKey) ?? .shiftBackslash
+    DebugLog.isEnabled = debugLogging
   }
 }
