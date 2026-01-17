@@ -7,6 +7,7 @@ final class OrbWindowController {
   private let settings: AppSettings
   private let voiceSession: VoiceSessionManager
   private var cancellables = Set<AnyCancellable>()
+  private var hideWorkItem: DispatchWorkItem?
 
   init(settings: AppSettings, voiceSession: VoiceSessionManager) {
     self.settings = settings
@@ -57,9 +58,15 @@ final class OrbWindowController {
 
   func setVisible(_ isVisible: Bool) {
     if isVisible {
+      hideWorkItem?.cancel()
+      hideWorkItem = nil
       bringToFront()
     } else {
-      panel.orderOut(nil)
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.panel.orderOut(nil)
+      }
+      hideWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
     }
   }
 

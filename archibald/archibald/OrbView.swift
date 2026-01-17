@@ -2,9 +2,49 @@ import Combine
 import SceneKit
 import SwiftUI
 
-struct OrbView: NSViewRepresentable {
+struct OrbView: View {
   @EnvironmentObject private var voiceSession: VoiceSessionManager
   @EnvironmentObject private var settings: AppSettings
+  @State private var introScale: CGFloat = 0.02
+
+  var body: some View {
+    OrbSceneView(voiceSession: voiceSession, orbSize: settings.orbSize, isListening: settings.isListening)
+      .scaleEffect(introScale)
+      .onAppear {
+        runIntroAnimation()
+      }
+      .onChange(of: settings.isOrbVisible) { _, isVisible in
+        if isVisible {
+          runIntroAnimation()
+        } else {
+          runHideAnimation()
+        }
+      }
+  }
+
+  private func runIntroAnimation() {
+    introScale = 0.02
+    withAnimation(.easeOut(duration: 0.35)) {
+      introScale = 1.08
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+      withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+        introScale = 1.0
+      }
+    }
+  }
+
+  private func runHideAnimation() {
+    withAnimation(.easeInOut(duration: 0.22)) {
+      introScale = 0.02
+    }
+  }
+}
+
+private struct OrbSceneView: NSViewRepresentable {
+  let voiceSession: VoiceSessionManager
+  let orbSize: Double
+  let isListening: Bool
 
   func makeNSView(context: Context) -> SCNView {
     let view = SCNView()
@@ -18,8 +58,8 @@ struct OrbView: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: SCNView, context: Context) {
-    context.coordinator.updateSize(for: settings.orbSize)
-    context.coordinator.bindListening(settings.isListening)
+    context.coordinator.updateSize(for: orbSize)
+    context.coordinator.bindListening(isListening)
   }
 
   func makeCoordinator() -> Coordinator {
