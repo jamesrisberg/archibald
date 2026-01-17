@@ -6,7 +6,7 @@ desktop, with conversation history saved automatically.
 
 ## Download
 
-- Latest DMG: https://github.com/jamesrisberg/archibald/releases/latest/download/Archibald.dmg
+- Latest DMG: [Download Archibald.dmg](https://github.com/jamesrisberg/archibald/releases/latest/download/Archibald.dmg)
 
 ## Features
 
@@ -57,5 +57,4 @@ The DMG will be created at `build/Archibald.dmg`.
 
 ## Support
 
-Support the project:
-https://buy.stripe.com/6oU5kDfq5g512861bedwc00
+Support the project: [Stripe](https://buy.stripe.com/6oU5kDfq5g512861bedwc00)
