@@ -13,6 +13,7 @@ final class VoiceSessionManager: ObservableObject {
   @Published private(set) var connectionState: ConnectionState = .idle
   @Published private(set) var inputLevel: Double = 0
   @Published private(set) var outputLevel: Double = 0
+  @Published private(set) var outputFeatures = AudioFeatures(rms: 0, zcr: 0)
   @Published private(set) var lastTranscript: String = ""
   @Published private(set) var conversationTranscript: String = ""
   @Published private(set) var lastError: String = ""
@@ -25,6 +26,11 @@ final class VoiceSessionManager: ObservableObject {
   @Published private(set) var speechState: SpeechState = .idle
   @Published private(set) var isRecording: Bool = false
 
+  struct AudioFeatures: Equatable {
+    let rms: Double
+    let zcr: Double
+  }
+
   private enum VAD {
     static let userStartThreshold: Double = 0.07
     static let userStopThreshold: Double = 0.035
@@ -36,6 +42,10 @@ final class VoiceSessionManager: ObservableObject {
 
   private enum Metering {
     static let outputLevelGain: Double = 6.0
+    static let rmsAttack: Double = 0.55
+    static let rmsRelease: Double = 0.15
+    static let zcrAttack: Double = 0.5
+    static let zcrRelease: Double = 0.2
   }
 
   private enum TranscriptStorage {
@@ -68,6 +78,8 @@ final class VoiceSessionManager: ObservableObject {
   private var speakingResetWorkItem: DispatchWorkItem?
   private var lastOutputActivityAt = Date.distantPast
   private var hasOutputTap = false
+  private var smoothedOutputRms: Double = 0
+  private var smoothedOutputZcr: Double = 0
   private var responseDoneAt = Date.distantPast
   private var lastAudioEndAt = Date.distantPast
   private var cancellables = Set<AnyCancellable>()
@@ -502,6 +514,46 @@ final class VoiceSessionManager: ObservableObject {
     }
   }
 
+  private func updateOutputFeatures(samples: UnsafeBufferPointer<Float>) {
+    guard !samples.isEmpty else { return }
+    var sumSquares = 0.0
+    var zeroCrossings = 0
+    var lastSign = samples[0] >= 0
+    for sample in samples {
+      let value = Double(sample)
+      sumSquares += value * value
+      let sign = sample >= 0
+      if sign != lastSign {
+        zeroCrossings += 1
+        lastSign = sign
+      }
+    }
+    let rms = sqrt(sumSquares / Double(samples.count))
+    let scaledRms = min(1.0, rms * Metering.outputLevelGain)
+    let zcr = min(1.0, Double(zeroCrossings) / Double(samples.count))
+
+    let nextRms = smoothValue(
+      current: smoothedOutputRms,
+      target: scaledRms,
+      attack: Metering.rmsAttack,
+      release: Metering.rmsRelease
+    )
+    let nextZcr = smoothValue(
+      current: smoothedOutputZcr,
+      target: zcr,
+      attack: Metering.zcrAttack,
+      release: Metering.zcrRelease
+    )
+    smoothedOutputRms = nextRms
+    smoothedOutputZcr = nextZcr
+    setOutputFeatures(AudioFeatures(rms: nextRms, zcr: nextZcr))
+  }
+
+  private func smoothValue(current: Double, target: Double, attack: Double, release: Double) -> Double {
+    let amount = target > current ? attack : release
+    return current + (target - current) * amount
+  }
+
   private func installOutputTapIfNeeded(format: AVAudioFormat) {
     guard !hasOutputTap else { return }
     hasOutputTap = true
@@ -523,6 +575,7 @@ final class VoiceSessionManager: ObservableObject {
         if self.playerNode.isPlaying && normalized > VAD.agentOutputThreshold {
           self.lastOutputActivityAt = Date()
         }
+        self.updateOutputFeatures(samples: samples)
       }
     }
   }
@@ -789,6 +842,12 @@ final class VoiceSessionManager: ObservableObject {
   private func setOutputLevel(_ level: Double) {
     DispatchQueue.main.async {
       self.outputLevel = level
+    }
+  }
+
+  private func setOutputFeatures(_ features: AudioFeatures) {
+    DispatchQueue.main.async {
+      self.outputFeatures = features
     }
   }
 

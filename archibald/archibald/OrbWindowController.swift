@@ -42,6 +42,10 @@ final class OrbWindowController {
     let rootView = OrbView()
       .environmentObject(settings)
       .environmentObject(voiceSession)
+      .contentShape(Rectangle())
+      .onTapGesture {
+        settings.isListening.toggle()
+      }
     let hostingView = NSHostingView(rootView: rootView)
     hostingView.wantsLayer = true
     hostingView.layer?.backgroundColor = NSColor.clear.cgColor
