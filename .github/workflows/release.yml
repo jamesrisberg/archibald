@@ -19,10 +19,19 @@ jobs:
           xcode-version: latest-stable
 
       - name: Import signing certificate
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.MACOS_SIGNING_CERT }}
-          p12-password: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+        env:
+          MACOS_SIGNING_CERT: ${{ secrets.MACOS_SIGNING_CERT }}
+          MACOS_SIGNING_CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          echo "$MACOS_SIGNING_CERT" | base64 --decode > signing.p12
+          KEYCHAIN=build.keychain-db
+          security create-keychain -p "$MACOS_SIGNING_CERT_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          security unlock-keychain -p "$MACOS_SIGNING_CERT_PASSWORD" "$KEYCHAIN"
+          security import signing.p12 -k "$KEYCHAIN" -P "$MACOS_SIGNING_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/xcodebuild
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security find-identity -v -p codesigning
 
       - name: Build archive
         run: |
