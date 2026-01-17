@@ -8,6 +8,7 @@ struct SettingsView: View {
   @State private var showTranscriptFolderError = false
   @State private var showApiKeyInfo = false
   @State private var showClearTranscriptConfirm = false
+  @State private var showDebugExportError = false
 
   var body: some View {
     ScrollView {
@@ -133,6 +134,18 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
           HStack {
+            Text("Selected Voice")
+            Spacer()
+            Text(settings.voice.rawValue)
+              .foregroundStyle(.secondary)
+          }
+          HStack {
+            Text("Server Voice")
+            Spacer()
+            Text(voiceSession.serverVoice.isEmpty ? "—" : voiceSession.serverVoice)
+              .foregroundStyle(.secondary)
+          }
+          HStack {
             Text("Speech State")
             Spacer()
             Text(voiceSession.speechState.rawValue)
@@ -161,6 +174,15 @@ struct SettingsView: View {
               .foregroundStyle(.red)
               .fixedSize(horizontal: false, vertical: true)
               .textSelection(.enabled)
+          }
+
+          MenuActionButton(title: "Export Voice Debug Log", systemImage: "doc.text.magnifyingglass")
+          {
+            if let url = voiceSession.exportVoiceDebugLog() {
+              NSWorkspace.shared.open(url)
+            } else {
+              showDebugExportError = true
+            }
           }
         }
       }
@@ -193,6 +215,11 @@ struct SettingsView: View {
       Button("OK", role: .cancel) {}
     } message: {
       Text("Create or copy your key from https://console.x.ai. Paste it here to connect.")
+    }
+    .alert("Export failed", isPresented: $showDebugExportError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text("Could not create the debug log file.")
     }
   }
 

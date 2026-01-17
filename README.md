@@ -11,7 +11,7 @@ desktop, with conversation history saved automatically.
 ## Features
 
 - Always present not-too-ominous orb that reacts to audio.
-- Global hotkey to show and start listening.
+- Global hotkey to hide, show and start listening.
 - Configurable voice and system prompt.
 - Conversation transcript saved per session.
 - Optional shared inbox folder for context.

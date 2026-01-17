@@ -17,6 +17,7 @@ final class VoiceSessionManager: ObservableObject {
   @Published private(set) var lastTranscript: String = ""
   @Published private(set) var conversationTranscript: String = ""
   @Published private(set) var lastError: String = ""
+  @Published private(set) var serverVoice: String = ""
   enum SpeechState: String {
     case idle
     case userSpeaking
@@ -52,6 +53,10 @@ final class VoiceSessionManager: ObservableObject {
     static let folderName = "Transcripts"
   }
 
+  private enum DebugStorage {
+    static let folderName = "Debug"
+  }
+
   private let settings: AppSettings
   private var webSocketTask: URLSessionWebSocketTask?
   private let audioEngine = AVAudioEngine()
@@ -83,6 +88,7 @@ final class VoiceSessionManager: ObservableObject {
   private var responseDoneAt = Date.distantPast
   private var lastAudioEndAt = Date.distantPast
   private var cancellables = Set<AnyCancellable>()
+  private var wsLogEntries: [String] = []
   private var transcriptFileURL: URL?
   private let transcriptFormatter: DateFormatter = {
     let formatter = DateFormatter()
@@ -134,10 +140,12 @@ final class VoiceSessionManager: ObservableObject {
     if connectionState == .connected {
       finalizeTurn()
     }
+    currentListeningState = false
     setInputLevel(0)
     setOutputLevel(0)
     setIsRecording(false)
     stopAudioCapture()
+    stopEngineIfIdle(force: true)
   }
 
   private func bindSettings() {
@@ -155,8 +163,14 @@ final class VoiceSessionManager: ObservableObject {
       }
       .store(in: &cancellables)
 
-    Publishers.CombineLatest(settings.$voice, settings.$systemPrompt)
-      .sink { [weak self] _, _ in
+    settings.$systemPrompt
+      .sink { [weak self] _ in
+        self?.sendSessionUpdate()
+      }
+      .store(in: &cancellables)
+
+    settings.$voice
+      .sink { [weak self] _ in
         self?.sendSessionUpdate()
       }
       .store(in: &cancellables)
@@ -347,6 +361,14 @@ final class VoiceSessionManager: ObservableObject {
       DispatchQueue.main.async {
         self.lastTranscript = ""
       }
+    case "session.updated":
+      if let session = json["session"] as? [String: Any],
+        let voice = session["voice"] as? String
+      {
+        DispatchQueue.main.async {
+          self.serverVoice = voice
+        }
+      }
     default:
       if type.hasPrefix("response.") || type.hasPrefix("conversation.")
         || type.hasPrefix("input_audio_buffer.")
@@ -444,6 +466,7 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func playAudioDelta(_ base64: String) {
+    ensureAudioEngineRunning()
     guard let data = Data(base64Encoded: base64), let outputFormat else { return }
     let frameCount = data.count / 2
     guard frameCount > 0 else { return }
@@ -549,7 +572,9 @@ final class VoiceSessionManager: ObservableObject {
     setOutputFeatures(AudioFeatures(rms: nextRms, zcr: nextZcr))
   }
 
-  private func smoothValue(current: Double, target: Double, attack: Double, release: Double) -> Double {
+  private func smoothValue(current: Double, target: Double, attack: Double, release: Double)
+    -> Double
+  {
     let amount = target > current ? attack : release
     return current + (target - current) * amount
   }
@@ -613,6 +638,25 @@ final class VoiceSessionManager: ObservableObject {
     setIsRecording(false)
   }
 
+  private func ensureAudioEngineRunning() {
+    guard !audioEngine.isRunning else { return }
+    do {
+      try audioEngine.start()
+    } catch {
+      setLastError("Audio engine failed to start: \(error.localizedDescription)")
+    }
+  }
+
+  private func stopEngineIfIdle(force: Bool = false) {
+    if !force {
+      guard !currentListeningState else { return }
+    }
+    guard scheduledAudioBuffers == 0, !playerNode.isPlaying else { return }
+    if audioEngine.isRunning {
+      audioEngine.stop()
+    }
+  }
+
   private func startPlaybackMonitor() {
     guard playbackMonitor == nil else { return }
     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
@@ -647,6 +691,7 @@ final class VoiceSessionManager: ObservableObject {
             userActive: self.userSpeechActive, agentActive: self.scheduledAudioBuffers > 0)
           if self.scheduledAudioBuffers == 0 {
             self.playerNode.stop()
+            self.stopEngineIfIdle()
           }
         }
       })
@@ -715,6 +760,7 @@ final class VoiceSessionManager: ObservableObject {
 
   private func stopAudioCapture() {
     audioEngine.inputNode.removeTap(onBus: 0)
+    stopEngineIfIdle(force: true)
   }
 
   private func stopWebSocket() {
@@ -730,6 +776,7 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func sendResponseCreate() {
+    sendSessionUpdate()
     let response: [String: Any] = [
       "type": "response.create",
       "response": [
@@ -798,7 +845,9 @@ final class VoiceSessionManager: ObservableObject {
 
   private func logEvent(direction: String, data: Data) {
     guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-      DebugLog.log("[Grok WS \(direction)] <non-JSON payload>")
+      let message = "[Grok WS \(direction)] <non-JSON payload>"
+      appendWsLog(message)
+      DebugLog.log(message)
       return
     }
     let type = (json["type"] as? String) ?? "unknown"
@@ -821,9 +870,22 @@ final class VoiceSessionManager: ObservableObject {
       let maxLength = 1200
       let truncated =
         string.count > maxLength ? String(string.prefix(maxLength)) + "…<truncated>" : string
-      DebugLog.log("[Grok WS \(direction)] \(type) \(truncated)")
+      let message = "[Grok WS \(direction)] \(type) \(truncated)"
+      appendWsLog(message)
+      DebugLog.log(message)
     } else {
-      DebugLog.log("[Grok WS \(direction)] \(type)")
+      let message = "[Grok WS \(direction)] \(type)"
+      appendWsLog(message)
+      DebugLog.log(message)
+    }
+  }
+
+  private func appendWsLog(_ message: String) {
+    let timestamp = transcriptFormatter.string(from: Date())
+    wsLogEntries.append("[\(timestamp)] \(message)")
+    let maxEntries = 300
+    if wsLogEntries.count > maxEntries {
+      wsLogEntries.removeFirst(wsLogEntries.count - maxEntries)
     }
   }
 
@@ -957,6 +1019,35 @@ final class VoiceSessionManager: ObservableObject {
     if let url = transcriptFileURL {
       writeTranscriptData(Data(), to: url, overwrite: true)
     }
+  }
+
+  func exportVoiceDebugLog() -> URL? {
+    let fileManager = FileManager.default
+    guard
+      let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return nil }
+    let folderURL = baseURL.appendingPathComponent("Archibald", isDirectory: true)
+      .appendingPathComponent(DebugStorage.folderName, isDirectory: true)
+    do {
+      try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
+    } catch {
+      return nil
+    }
+
+    let timestamp = Date().formatted(.dateTime.year().month().day().hour().minute().second())
+    let fileURL = folderURL.appendingPathComponent("VoiceDebug \(timestamp).txt")
+    var lines: [String] = []
+    lines.append("Archibald Voice Debug Log")
+    lines.append("Timestamp: \(timestamp)")
+    lines.append("Selected Voice: \(settings.voice.rawValue)")
+    lines.append("Server Voice: \(serverVoice.isEmpty ? "—" : serverVoice)")
+    lines.append("Speech State: \(speechState.rawValue)")
+    lines.append("")
+    lines.append("WebSocket Log:")
+    lines.append(contentsOf: wsLogEntries)
+    let body = lines.joined(separator: "\n")
+    try? body.data(using: .utf8)?.write(to: fileURL, options: .atomic)
+    return fileURL
   }
 
   func resetSession() {
