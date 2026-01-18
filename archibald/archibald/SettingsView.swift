@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import Sparkle
 import SwiftUI
 
 struct SettingsView: View {
@@ -122,6 +124,10 @@ struct SettingsView: View {
             MenuActionButton(title: "Open Folder", systemImage: "folder", action: openInboxFolder)
               .disabled(settings.inboxFolderPath.isEmpty)
           }
+        }
+
+        SettingsSection(title: "Updates") {
+          CheckForUpdatesView()
         }
 
         SettingsSection(title: "Debug") {
@@ -261,6 +267,36 @@ struct SettingsView: View {
       return
     }
     NSWorkspace.shared.open(url)
+  }
+}
+
+private struct CheckForUpdatesView: View {
+  @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
+
+  init() {
+    let updater = (NSApp.delegate as? AppDelegate)?.updaterController.updater
+    self.checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: updater)
+  }
+
+  var body: some View {
+    MenuActionButton(
+      title: "Check for Updates",
+      systemImage: "arrow.triangle.2.circlepath"
+    ) {
+      (NSApp.delegate as? AppDelegate)?.updaterController.checkForUpdates(nil)
+    }
+    .disabled(!checkForUpdatesViewModel.canCheckForUpdates)
+  }
+}
+
+private final class CheckForUpdatesViewModel: ObservableObject {
+  @Published var canCheckForUpdates = false
+  private var cancellable: AnyCancellable?
+
+  init(updater: SPUUpdater?) {
+    guard let updater else { return }
+    cancellable = updater.publisher(for: \.canCheckForUpdates)
+      .assign(to: \.canCheckForUpdates, on: self)
   }
 }
 

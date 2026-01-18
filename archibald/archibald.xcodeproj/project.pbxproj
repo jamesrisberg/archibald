@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6E06430B2F1D554500B4469C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6E06430A2F1D554500B4469C /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		6E06408F2F1AB57500B4469C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,9 +33,22 @@
 		6E0640982F1AB57500B4469C /* archibaldUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = archibaldUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6E06430D2F1D558F00B4469C /* Exceptions for "archibald" folder in "archibald" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6E06407E2F1AB57400B4469C /* archibald */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6E0640812F1AB57400B4469C /* archibald */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6E06430D2F1D558F00B4469C /* Exceptions for "archibald" folder in "archibald" target */,
+			);
 			path = archibald;
 			sourceTree = "<group>";
 		};
@@ -52,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6E06430B2F1D554500B4469C /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +130,7 @@
 			);
 			name = archibald;
 			packageProductDependencies = (
+				6E06430A2F1D554500B4469C /* Sparkle */,
 			);
 			productName = archibald;
 			productReference = 6E06407F2F1AB57400B4469C /* archibald.app */;
@@ -195,6 +214,9 @@
 			);
 			mainGroup = 6E0640762F1AB57400B4469C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6E0643092F1D554500B4469C /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6E0640802F1AB57400B4469C /* Products */;
 			projectDirPath = "";
@@ -406,6 +428,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = archibald/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Archibald needs microphone access to hear you.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -442,6 +465,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = archibald/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Archibald needs microphone access to hear you.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -581,6 +605,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6E0643092F1D554500B4469C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6E06430A2F1D554500B4469C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6E0643092F1D554500B4469C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6E0640772F1AB57400B4469C /* Project object */;
 }

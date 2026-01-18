@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Sparkle
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   weak var settings: AppSettings?
@@ -7,6 +8,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var orbWindowController: OrbWindowController?
   private let hotKeyManager = GlobalHotKeyManager()
   private var cancellables = Set<AnyCancellable>()
+
+  let updaterController = SPUStandardUpdaterController(
+    startingUpdater: true,
+    updaterDelegate: nil,
+    userDriverDelegate: nil
+  )
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard let settings, let voiceSession else { return }
