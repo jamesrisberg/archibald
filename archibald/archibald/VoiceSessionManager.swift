@@ -244,7 +244,6 @@ final class VoiceSessionManager: ObservableObject {
         "voice": settings.voice.rawValue,
         "instructions": settings.systemPrompt,
         "keep_context": true,
-        "turn_detection": ["type": nil],
         "modalities": ["audio", "text"],
         "audio": [
           "input": ["format": ["type": "audio/pcm", "rate": 24000]],
