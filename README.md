@@ -58,3 +58,7 @@ The DMG will be created at `build/Archibald.dmg`.
 ## Support
 
 Support the project: [Stripe](https://buy.stripe.com/6oU5kDfq5g512861bedwc00)
+
+## License
+
+MIT. See `LICENSE`.
