@@ -42,6 +42,47 @@ if [[ "${NOTARIZE}" == "1" ]]; then
   require_env APPLE_APP_SPECIFIC_PASSWORD
 fi
 
+PROJECT_PBXPROJ="${PROJECT_PATH}/project.pbxproj"
+if [[ ! -f "${PROJECT_PBXPROJ}" ]]; then
+  echo "Error: ${PROJECT_PBXPROJ} not found" >&2
+  exit 1
+fi
+
+CURRENT_VERSION=$(
+  xcodebuild -project "${PROJECT_PATH}" -scheme "${SCHEME}" -configuration Release -showBuildSettings \
+    | awk -F ' = ' '/MARKETING_VERSION/ { print $2; exit }'
+)
+if [[ -z "${CURRENT_VERSION}" ]]; then
+  echo "Error: Unable to read MARKETING_VERSION from build settings." >&2
+  exit 1
+fi
+CURRENT_BUILD_NUMBER=$(
+  xcodebuild -project "${PROJECT_PATH}" -scheme "${SCHEME}" -configuration Release -showBuildSettings \
+    | awk -F ' = ' '/CURRENT_PROJECT_VERSION/ { print $2; exit }'
+)
+if [[ -z "${CURRENT_BUILD_NUMBER}" ]]; then
+  echo "Error: Unable to read CURRENT_PROJECT_VERSION from build settings." >&2
+  exit 1
+fi
+if ! [[ "${CURRENT_BUILD_NUMBER}" =~ ^[0-9]+$ ]]; then
+  echo "Error: CURRENT_PROJECT_VERSION is not numeric: ${CURRENT_BUILD_NUMBER}" >&2
+  exit 1
+fi
+NEXT_BUILD_NUMBER=$((CURRENT_BUILD_NUMBER + 1))
+echo "Current project version: ${CURRENT_VERSION}"
+echo "Current build number: ${CURRENT_BUILD_NUMBER} -> ${NEXT_BUILD_NUMBER}"
+read -r -p "Enter release version (e.g. ${CURRENT_VERSION}): " RELEASE_VERSION
+if [[ -z "${RELEASE_VERSION}" ]]; then
+  echo "Error: Release version is required." >&2
+  exit 1
+fi
+if [[ "${RELEASE_VERSION}" != "${CURRENT_VERSION}" ]]; then
+  echo "Updating project version to ${RELEASE_VERSION}"
+  perl -0pi -e "s/(MARKETING_VERSION = )[^;]+;/\${1}${RELEASE_VERSION};/g" "${PROJECT_PBXPROJ}"
+fi
+echo "Incrementing build number to ${NEXT_BUILD_NUMBER}"
+perl -0pi -e "s/(CURRENT_PROJECT_VERSION = )[0-9]+;/\${1}${NEXT_BUILD_NUMBER};/g" "${PROJECT_PBXPROJ}"
+
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
@@ -89,6 +130,10 @@ INFO_PLIST="${APP_PATH}/Contents/Info.plist"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "${INFO_PLIST}")
 BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "${INFO_PLIST}")
 echo "==> Version: ${VERSION} (${BUILD_NUMBER})"
+if [[ "${VERSION}" != "${RELEASE_VERSION}" ]]; then
+  echo "Error: Built app version (${VERSION}) does not match requested version (${RELEASE_VERSION})." >&2
+  exit 1
+fi
 
 echo "==> Creating DMG"
 mkdir -p "${BUILD_DIR}/dmg"
@@ -153,7 +198,7 @@ NEW_ITEM=$(cat <<EOF
     <item>
       <title>Version ${VERSION}</title>
       <description><![CDATA[
-        <h2>What's New in ${VERSION}</h2>
+        <h2>What&apos;s New in ${VERSION}</h2>
         <ul>
           <li>Update release notes here</li>
         </ul>
@@ -170,33 +215,35 @@ NEW_ITEM=$(cat <<EOF
     </item>
 EOF
 )
+NEW_ITEM_FILE="${BUILD_DIR}/appcast-item.xml"
+printf "%s" "${NEW_ITEM}" > "${NEW_ITEM_FILE}"
 
 # Insert new item after <language>en</language> line
 if [[ -f "${APPCAST_PATH}" ]]; then
-  # Check if this version already exists in appcast
-  if grep -q "sparkle:version>${BUILD_NUMBER}<" "${APPCAST_PATH}"; then
-    echo "Warning: Version ${BUILD_NUMBER} already in appcast.xml, updating in place..."
-    # Remove old entry for this version and add new one
-    # This is a simple approach - for production you might want something more robust
-    awk -v new_item="${NEW_ITEM}" -v build="${BUILD_NUMBER}" '
-      /<item>/ { in_item=1; item_buf=$0; next }
-      in_item && /<\/item>/ {
-        item_buf=item_buf ORS $0
-        if (item_buf ~ "sparkle:version>" build "<") {
-          print new_item
-        } else {
-          print item_buf
-        }
-        in_item=0; item_buf=""
-        next
-      }
-      in_item { item_buf=item_buf ORS $0; next }
-      { print }
-    ' "${APPCAST_PATH}" > "${APPCAST_PATH}.tmp" && mv "${APPCAST_PATH}.tmp" "${APPCAST_PATH}"
+  # Insert new item at the top (after the comment line)
+  if grep -q "sparkle:version>${BUILD_NUMBER}<" "${APPCAST_PATH}" || grep -q "sparkle:shortVersionString>${VERSION}<" "${APPCAST_PATH}"; then
+    echo "Warning: Version ${VERSION} already in appcast.xml; adding another entry at the top."
+  fi
+  awk -v new_item_file="${NEW_ITEM_FILE}" '
+    BEGIN {
+      new_item = ""
+      while ((getline line < new_item_file) > 0) { new_item = new_item line ORS }
+      close(new_item_file)
+    }
+    /<!-- Add new versions at the top -->/ { print; printf "%s", new_item; next }
+    { print }
+  ' "${APPCAST_PATH}" > "${APPCAST_PATH}.tmp"
+  if ! cmp -s "${APPCAST_PATH}" "${APPCAST_PATH}.tmp"; then
+    mv "${APPCAST_PATH}.tmp" "${APPCAST_PATH}"
   else
-    # Insert new item at the top (after the comment line)
-    awk -v new_item="${NEW_ITEM}" '
-      /<!-- Add new versions at the top -->/ { print; print new_item; next }
+    # Fallback: insert after <language> if comment marker missing
+    awk -v new_item_file="${NEW_ITEM_FILE}" '
+      BEGIN {
+        new_item = ""
+        while ((getline line < new_item_file) > 0) { new_item = new_item line ORS }
+        close(new_item_file)
+      }
+      /<language>en<\/language>/ { print; printf "%s", new_item; next }
       { print }
     ' "${APPCAST_PATH}" > "${APPCAST_PATH}.tmp" && mv "${APPCAST_PATH}.tmp" "${APPCAST_PATH}"
   fi
