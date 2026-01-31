@@ -16,6 +16,12 @@ desktop, with conversation history saved automatically.
 - Conversation transcript saved per session.
 - Optional shared inbox folder for context.
 
+## Roadmap
+
+- Conversation history explorer and local memory files for context management
+- Grok Collections API integration for operating on files
+- Agent-calling integration for spawing other agent
+
 ## Requirements
 
 - macOS 13+
