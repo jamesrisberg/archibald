@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "checksums": {
+    "principal.md": {
+      "sha256": "c6b083bcfa46daa7c908664241ace3e7996f289ce37398ff128bcc4e0ea8065a",
+      "last_verified": "2026-03-02T06:40:40Z",
+      "size_bytes": 1106
+    },
+    "mission.md": {
+      "sha256": "f2286073eeb14985bd8f59194b160ba9fe421d373a1642729c8b101b582019dd",
+      "last_verified": "2026-03-02T06:40:40Z",
+      "size_bytes": 1496
+    }
+  }
+}

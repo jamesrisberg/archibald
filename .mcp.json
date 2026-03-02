@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cairn": {
+      "command": "/Users/jrisberg/.local/bin/cairn",
+      "args": [
+        "serve",
+        "--persist-dir",
+        "/Users/jrisberg/dev/archibald/.persist"
+      ]
+    }
+  }
+}
