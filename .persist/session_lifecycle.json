@@ -1,0 +1,32 @@
+{
+  "sessions": [
+    {
+      "agent": "default",
+      "open_at": "2026-03-02T06:41:40Z",
+      "close_type": "crash",
+      "close_at": "(detected at next startup)",
+      "checkpoints": 0
+    },
+    {
+      "agent": "default",
+      "open_at": "2026-03-02T07:35:51Z",
+      "close_type": "crash",
+      "close_at": "(detected at next startup)",
+      "checkpoints": 0
+    },
+    {
+      "agent": "default",
+      "open_at": "2026-03-02T08:54:13Z",
+      "close_type": "crash",
+      "close_at": "(detected at next startup)",
+      "checkpoints": 0
+    },
+    {
+      "agent": "default",
+      "open_at": "2026-03-11T23:38:47Z",
+      "close_type": null,
+      "close_at": null,
+      "checkpoints": 0
+    }
+  ]
+}

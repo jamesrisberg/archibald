@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    settings?.isListening = false
     orbWindowController = nil
     hotKeyManager.stop()
   }

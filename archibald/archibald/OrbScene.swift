@@ -1,3 +1,4 @@
+import AppKit
 import SceneKit
 
 final class OrbScene {
@@ -10,20 +11,50 @@ final class OrbScene {
   private let rimLightNode = SCNNode()
   private var currentLightColor = SIMD3<Double>(0.2, 0.95, 0.55)
 
+  // Time-based animation state
+  private var previousTime: TimeInterval = 0
+  private var previousSpeechState: VoiceSessionManager.SpeechState = .idle
+  private var previousListening = false
+  private var previousRms: Double = 0
+
+  // Squash & stretch
+  private var currentSquashStretch = SIMD3<Float>(1, 1, 1)
+
+  // Eyes
+  private let eyes = OrbEyes(parentRadius: 0.6)
+  private var idleDuration: TimeInterval = 0
+
+  // Fidgets
+  private let fidgetController = OrbFidgetController()
+
+  // Reactions
+  private let reactionController = OrbReactionController()
+
+  // Particles
+  private var particleSystem: SCNParticleSystem?
+  private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
   init() {
     scene = SCNScene()
     setupCamera()
     setupLighting()
     setupOrb()
+    setupEyes()
+    setupParticles()
   }
 
   func update(
+    time: TimeInterval,
     features: VoiceSessionManager.AudioFeatures,
     speechState: VoiceSessionManager.SpeechState,
     isListening: Bool,
-    rmsOverride: Double?
+    rmsOverride: Double?,
+    mousePosition: NSPoint?
   ) {
-    hoverPhase += 0.05
+    let deltaTime = previousTime > 0 ? min(time - previousTime, 1.0 / 15.0) : 1.0 / 60.0
+    previousTime = time
+
+    hoverPhase += CGFloat(deltaTime * 3.0)
     let hover = 0.025 * sin(hoverPhase)
     let isSpeaking = speechState != .idle || isListening
     let isUser = speechState == .userSpeaking || isListening
@@ -34,12 +65,36 @@ final class OrbScene {
     let targetScale: CGFloat = 1.0 + pulseAmount
     pulseScale = lerp(current: pulseScale, target: targetScale, amount: 0.2)
     let combinedScale = pulseScale
+
+    // Squash & stretch: driven by rate of change in audio energy
+    let rmsDerivative = deltaTime > 0 ? (activeRms - previousRms) / deltaTime : 0
+    let stretchAmount = Float(min(0.08, max(-0.08, rmsDerivative * 0.04)))
+    let baseScale = Float(combinedScale)
+    let targetScaleY = baseScale + stretchAmount
+    let targetScaleXZ = baseScale - stretchAmount * 0.5  // Volume preservation
+    let targetSS = SIMD3<Float>(targetScaleXZ, targetScaleY, targetScaleXZ)
+    let ssSpeed = Float(deltaTime * 12.0)
+    currentSquashStretch += (targetSS - currentSquashStretch) * ssSpeed
+
+    // Idle fidgets
+    let isIdle = speechState == .idle && !isListening
+    let fidget = fidgetController.update(deltaTime: deltaTime, isIdle: isIdle, currentTime: time)
+
     orbNode.scale = SCNVector3(
-      Float(combinedScale),
-      Float(combinedScale),
-      Float(combinedScale)
+      currentSquashStretch.x,
+      currentSquashStretch.y,
+      currentSquashStretch.z
     )
-    orbNode.position = SCNVector3(0, Float(hover), 0)
+    orbNode.position = SCNVector3(
+      CGFloat(fidget.positionOffset.x),
+      hover + CGFloat(fidget.positionOffset.y),
+      CGFloat(fidget.positionOffset.z)
+    )
+    orbNode.eulerAngles = SCNVector3(
+      CGFloat(fidget.rotationOffset.x),
+      CGFloat(fidget.rotationOffset.y),
+      CGFloat(fidget.rotationOffset.z)
+    )
 
     let targetColor: SIMD3<Double>
     switch speechState {
@@ -80,6 +135,92 @@ final class OrbScene {
     )
     keyLightNode.light?.color = lightColor
     rimLightNode.light?.color = lightColor
+
+    // Determine eye expression from state
+    if isIdle {
+      idleDuration += deltaTime
+    } else {
+      idleDuration = 0
+    }
+
+    let eyeExpression: OrbEyes.Expression
+    if isListening && !previousListening {
+      eyeExpression = .wide
+    } else if speechState == .userSpeaking {
+      eyeExpression = .wide
+    } else if speechState == .agentSpeaking {
+      eyeExpression = .squint
+    } else if idleDuration > 10.0 {
+      eyeExpression = .drowsy
+    } else {
+      eyeExpression = .neutral
+    }
+
+    // Use fidget gaze override if present, otherwise mouse position
+    let effectiveMousePosition: NSPoint?
+    if let gazeOverride = fidget.eyeGazeOverride {
+      effectiveMousePosition = NSPoint(
+        x: CGFloat(gazeOverride.x / 0.03),  // Convert back to -1...1 range
+        y: CGFloat(gazeOverride.y / 0.03)
+      )
+    } else {
+      effectiveMousePosition = mousePosition
+    }
+
+    eyes.update(
+      deltaTime: deltaTime, mousePosition: effectiveMousePosition, expression: eyeExpression)
+    eyes.updateLidColor(baseColor)
+
+    // Detect state transitions and trigger reactions
+    if speechState != previousSpeechState {
+      switch (previousSpeechState, speechState) {
+      case (_, .userSpeaking):
+        reactionController.trigger(.userStartedSpeaking, at: time)
+      case (_, .agentSpeaking):
+        reactionController.trigger(.agentStartedSpeaking, at: time)
+      case (.userSpeaking, .idle), (.agentSpeaking, .idle):
+        if !isListening {
+          reactionController.trigger(.conversationEnded, at: time)
+        }
+      default:
+        break
+      }
+    }
+    if isListening && !previousListening {
+      reactionController.trigger(.summoned, at: time)
+    }
+
+    // Apply reaction outputs (additive to fidget)
+    let reaction = reactionController.update(currentTime: time)
+    if reactionController.isActive {
+      orbNode.position.y += CGFloat(reaction.positionOffset.y)
+      orbNode.eulerAngles.x += CGFloat(reaction.rotationOffset.x)
+      orbNode.scale.x *= CGFloat(reaction.scaleMultiplier)
+      orbNode.scale.y *= CGFloat(reaction.scaleMultiplier)
+      orbNode.scale.z *= CGFloat(reaction.scaleMultiplier)
+    }
+
+    // Modulate particles
+    if let ps = particleSystem {
+      let targetBirthRate: CGFloat
+      switch speechState {
+      case .userSpeaking: targetBirthRate = 8
+      case .agentSpeaking: targetBirthRate = 12
+      case .idle: targetBirthRate = isListening ? 5 : 2
+      }
+      ps.birthRate = targetBirthRate
+      ps.particleColor = baseColor.withAlphaComponent(0.7)
+    }
+
+    // Track state for transition detection
+    let activeRmsForTracking = rmsOverride ?? features.rms
+    previousSpeechState = speechState
+    previousListening = isListening
+    previousRms = activeRmsForTracking
+  }
+
+  func triggerDismissed() {
+    reactionController.trigger(.dismissed, at: previousTime)
   }
 
   func loadModel(from url: URL) {
@@ -138,6 +279,43 @@ final class OrbScene {
     orb.firstMaterial = material
     orbNode.geometry = orb
     scene.rootNode.addChildNode(orbNode)
+  }
+
+  private func setupEyes() {
+    orbNode.addChildNode(eyes.leftEyeNode)
+    orbNode.addChildNode(eyes.rightEyeNode)
+  }
+
+  private func setupParticles() {
+    guard !reduceMotion else { return }
+
+    let particles = SCNParticleSystem()
+    particles.emitterShape = SCNSphere(radius: 0.65)
+    particles.emittingDirection = SCNVector3(0, 1, 0)
+    particles.spreadingAngle = 180
+    particles.birthRate = 2
+    particles.particleLifeSpan = 4.0
+    particles.particleLifeSpanVariation = 1.5
+    particles.particleSize = 0.012
+    particles.particleSizeVariation = 0.006
+    particles.particleVelocity = 0.02
+    particles.particleVelocityVariation = 0.01
+    particles.particleColor = NSColor(calibratedRed: 0.2, green: 0.95, blue: 0.55, alpha: 0.7)
+    particles.particleColorVariation = SCNVector4(0.1, 0.1, 0.1, 0.2)
+    particles.blendMode = .additive
+    particles.isAffectedByGravity = false
+    particles.isAffectedByPhysicsFields = false
+
+    // Fade in and out over particle lifetime
+    let sizeAnim = CAKeyframeAnimation()
+    sizeAnim.values = [0.0, 1.0, 1.0, 0.0] as [NSNumber]
+    sizeAnim.keyTimes = [0.0, 0.1, 0.8, 1.0]
+    sizeAnim.duration = 1.0
+    let sizeController = SCNParticlePropertyController(animation: sizeAnim)
+    particles.propertyControllers = [.size: sizeController]
+
+    particleSystem = particles
+    orbNode.addParticleSystem(particles)
   }
 
   private func lerp(current: CGFloat, target: CGFloat, amount: CGFloat) -> CGFloat {

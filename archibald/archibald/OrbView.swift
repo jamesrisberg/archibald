@@ -8,7 +8,7 @@ struct OrbView: View {
   @State private var introScale: CGFloat = 0.02
 
   var body: some View {
-    OrbSceneView(voiceSession: voiceSession, orbSize: settings.orbSize, isListening: settings.isListening)
+    OrbSceneView(voiceSession: voiceSession, orbSize: settings.orbSize, isListening: settings.isListening, isOrbVisible: settings.isOrbVisible)
       .scaleEffect(introScale)
       .onAppear {
         runIntroAnimation()
@@ -35,8 +35,11 @@ struct OrbView: View {
   }
 
   private func runHideAnimation() {
-    withAnimation(.easeInOut(duration: 0.22)) {
-      introScale = 0.02
+    // Delay shrink to let the 3D sad-droop reaction play first
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+      withAnimation(.easeInOut(duration: 0.22)) {
+        introScale = 0.02
+      }
     }
   }
 }
@@ -45,6 +48,7 @@ private struct OrbSceneView: NSViewRepresentable {
   let voiceSession: VoiceSessionManager
   let orbSize: Double
   let isListening: Bool
+  let isOrbVisible: Bool
 
   func makeNSView(context: Context) -> SCNView {
     let view = SCNView()
@@ -54,12 +58,14 @@ private struct OrbSceneView: NSViewRepresentable {
     view.rendersContinuously = true
     view.isPlaying = true
     view.delegate = context.coordinator
+    context.coordinator.scnView = view
     return view
   }
 
   func updateNSView(_ nsView: SCNView, context: Context) {
     context.coordinator.updateSize(for: orbSize)
     context.coordinator.bindListening(isListening)
+    context.coordinator.updateVisibility(isOrbVisible)
   }
 
   func makeCoordinator() -> Coordinator {
@@ -68,6 +74,7 @@ private struct OrbSceneView: NSViewRepresentable {
 
   final class Coordinator: NSObject, SCNSceneRendererDelegate {
     let orbScene = OrbScene()
+    weak var scnView: SCNView?
     private var cancellables = Set<AnyCancellable>()
     private var latestFeatures = VoiceSessionManager.AudioFeatures(rms: 0, zcr: 0)
     private var latestSpeechState: VoiceSessionManager.SpeechState = .idle
@@ -111,8 +118,17 @@ private struct OrbSceneView: NSViewRepresentable {
       orbScene.scene.rootNode.scale = SCNVector3(scale, scale, scale)
     }
 
+    private var latestOrbVisible = true
+
     func bindListening(_ isListening: Bool) {
       latestListening = isListening
+    }
+
+    func updateVisibility(_ isVisible: Bool) {
+      if !isVisible && latestOrbVisible {
+        orbScene.triggerDismissed()
+      }
+      latestOrbVisible = isVisible
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
@@ -122,11 +138,28 @@ private struct OrbSceneView: NSViewRepresentable {
       } else {
         rmsOverride = nil
       }
+
+      // Convert global mouse position to normalized -1...1 coords relative to SCNView
+      var mousePosition: NSPoint?
+      if let view = scnView, let window = view.window {
+        let screenPoint = NSEvent.mouseLocation
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let localPoint = view.convert(windowPoint, from: nil)
+        let bounds = view.bounds
+        if bounds.width > 0 && bounds.height > 0 {
+          let nx = (localPoint.x / bounds.width) * 2 - 1
+          let ny = (localPoint.y / bounds.height) * 2 - 1
+          mousePosition = NSPoint(x: nx, y: ny)
+        }
+      }
+
       orbScene.update(
+        time: time,
         features: latestFeatures,
         speechState: latestSpeechState,
         isListening: latestListening,
-        rmsOverride: rmsOverride
+        rmsOverride: rmsOverride,
+        mousePosition: mousePosition
       )
     }
   }

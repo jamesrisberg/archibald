@@ -137,6 +137,7 @@ final class VoiceSessionManager: ObservableObject {
 
   func stopListening() {
     isStopping = true
+    pendingStartCapture = false
     if connectionState == .connected {
       finalizeTurn()
     }
@@ -196,6 +197,7 @@ final class VoiceSessionManager: ObservableObject {
 
   private func connect(withAudio: Bool) async {
     guard connectionState == .idle else { return }
+    guard currentListeningState || !withAudio else { return }
     setConnectionState(.connecting)
     setLastError("")
 
