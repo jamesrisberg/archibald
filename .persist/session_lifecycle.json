@@ -24,6 +24,13 @@
     {
       "agent": "default",
       "open_at": "2026-03-11T23:38:47Z",
+      "close_type": "crash",
+      "close_at": "(detected at next startup)",
+      "checkpoints": 0
+    },
+    {
+      "agent": "default",
+      "open_at": "2026-03-26T03:44:53Z",
       "close_type": null,
       "close_at": null,
       "checkpoints": 0

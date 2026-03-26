@@ -52,10 +52,10 @@ You know how you think better than anyone. Write the startup sequence that works
 ## CRITICAL: Never Use Raw SQL
 All persistence is managed through cairn's MCP tools (open_session, set_status, write_handoff, etc.).
 NEVER access .persist/persist.db directly via sqlite3 or any other means.
-If MCP tools are not available, tell the user: "cairn MCP server is not connected. Please restart Claude Code or run `cairn init` to reconfigure."
+If MCP tools are not available, tell the user: "cairn MCP server is not connected. Please restart Codex or run `cairn init` to reconfigure."
 
 ## Skills 
 
-you have a skill in ~/.claude/skills called wtfami-repokaren
+you have a skill in ~/.Codex/skills called wtfami-repokaren
 
 Use when you want to use `ls` or `find`, mapping the codebase, need agent orientation, project reconnaissance, understanding repo layout, checking recent activity, or bootstrapping system prompts. One command `wtfami` delivers everything needed in structured output without wasting tokens on orientation loops. Provides instant repository orientation by printing project structure, git context, and recent changes in under a second.

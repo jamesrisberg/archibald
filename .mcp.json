@@ -7,6 +7,12 @@
         "--persist-dir",
         "/Users/jrisberg/dev/archibald/.persist"
       ]
+    },
+    "qmd": {
+      "command": "/Users/jrisberg/.bun/bin/qmd",
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

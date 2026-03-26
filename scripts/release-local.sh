@@ -14,6 +14,15 @@ DMG_PATH="${BUILD_DIR}/Archibald.dmg"
 
 NOTARIZE="${NOTARIZE:-1}"
 
+# Load env vars from .env if present
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/../.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  source "${ENV_FILE}"
+  set +a
+fi
+
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
