@@ -5,6 +5,7 @@ import Sparkle
 final class AppDelegate: NSObject, NSApplicationDelegate {
   weak var settings: AppSettings?
   weak var voiceSession: VoiceSessionManager?
+  weak var collectionSync: CollectionSyncEngine?
   private var orbWindowController: OrbWindowController?
   private let hotKeyManager = GlobalHotKeyManager()
   private var cancellables = Set<AnyCancellable>()
@@ -18,15 +19,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     guard let settings, let voiceSession else { return }
     settings.isListening = false
-    let controller = OrbWindowController(settings: settings, voiceSession: voiceSession)
+    let orbWalkFacing = OrbWalkFacing()
+    let controller = OrbWindowController(
+      settings: settings, voiceSession: voiceSession, orbWalkFacing: orbWalkFacing)
     orbWindowController = controller
     controller.setVisible(settings.isOrbVisible)
 
     hotKeyManager.onPrimary = {
       if !settings.isOrbVisible {
+        // Let the visibility sink drive the entrance animation; calling
+        // bringToFront() here would prematurely make the panel visible at its
+        // off-screen frame and short-circuit the slide-in.
         settings.isOrbVisible = true
         settings.isListening = true
-        controller.bringToFront()
       } else {
         controller.bringToFront()
         settings.isListening.toggle()

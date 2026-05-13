@@ -97,7 +97,7 @@ final class OrbFidgetController {
     case .lookAround: return 2.0
     case .smallBounce: return 0.8
     case .curiousTilt: return 2.0
-    case .slowSpin: return 3.0
+    case .slowSpin: return 3.5
     }
   }
 
@@ -117,15 +117,16 @@ final class OrbFidgetController {
 
     case .lookAround:
       // Eyes sweep left, pause, sweep right, return to center
+      let g = OrbEyes.maxPupilOffset
       let gazeX: Float
       if t < 0.25 {
-        gazeX = -sin(t / 0.25 * pi / 2) * 0.03
+        gazeX = -sin(t / 0.25 * pi / 2) * g
       } else if t < 0.5 {
-        gazeX = -0.03
+        gazeX = -g
       } else if t < 0.75 {
-        gazeX = -0.03 + sin((t - 0.5) / 0.25 * pi / 2) * 0.06
+        gazeX = -g + sin((t - 0.5) / 0.25 * pi / 2) * (2 * g)
       } else {
-        gazeX = 0.03 - sin((t - 0.75) / 0.25 * pi / 2) * 0.03
+        gazeX = g - sin((t - 0.75) / 0.25 * pi / 2) * g
       }
       output.eyeGazeOverride = SIMD2<Float>(gazeX, 0)
 
@@ -146,9 +147,29 @@ final class OrbFidgetController {
       }
 
     case .slowSpin:
-      // Full 360 Y rotation with ease-in-out
-      let eased = t * t * (3 - 2 * t)  // Smoothstep
-      output.rotationOffset.y = eased * 2 * pi
+      // Wind-up (anticipation) → fast sweep → overshoot past 2π → settle.
+      let twoPi = 2 * pi
+      let anticipation: Float = -0.44
+      let overshootPast: Float = 0.32
+      let tAnticipationEnd: Float = 0.13
+      let tSpinEnd: Float = 0.80
+
+      if t < tAnticipationEnd {
+        let u = t / tAnticipationEnd
+        let eased = 1 - (1 - u) * (1 - u)
+        output.rotationOffset.y = eased * anticipation
+      } else if t < tSpinEnd {
+        let u = (t - tAnticipationEnd) / (tSpinEnd - tAnticipationEnd)
+        let p = 1 - (1 - u) * (1 - u) * (1 - u)
+        let start = anticipation
+        let end = twoPi + overshootPast
+        output.rotationOffset.y = start + p * (end - start)
+      } else {
+        let u = (t - tSpinEnd) / (1 - tSpinEnd)
+        let eased = 1 - (1 - u) * (1 - u) * (1 - u)
+        let start = twoPi + overshootPast
+        output.rotationOffset.y = start + eased * (twoPi - start)
+      }
     }
 
     return output

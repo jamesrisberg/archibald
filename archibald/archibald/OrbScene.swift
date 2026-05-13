@@ -15,13 +15,17 @@ final class OrbScene {
   private var previousTime: TimeInterval = 0
   private var previousSpeechState: VoiceSessionManager.SpeechState = .idle
   private var previousListening = false
-  private var previousRms: Double = 0
+  /// Smoothed RMS for squash/pulse — raw audio jumps cause visible stutter on the derivative.
+  private var smoothedRms: Double = 0
+  private var lastSmoothedRms: Double = 0
+  private var rmsFilterInitialized = false
 
   // Squash & stretch
   private var currentSquashStretch = SIMD3<Float>(1, 1, 1)
 
-  // Eyes
+  // Eyes + simple face (brows, faux mouth)
   private let eyes = OrbEyes(parentRadius: 0.6)
+  private let face = OrbFaceFeatures(parentRadius: 0.6)
   private var idleDuration: TimeInterval = 0
 
   // Fidgets
@@ -29,6 +33,9 @@ final class OrbScene {
 
   // Reactions
   private let reactionController = OrbReactionController()
+
+  /// Added to eulerAngles.y (slide-in faces edge, slide-out faces edge; at rest ~0).
+  var walkFacingYawRadians: CGFloat = 0
 
   // Particles
   private var particleSystem: SCNParticleSystem?
@@ -39,7 +46,7 @@ final class OrbScene {
     setupCamera()
     setupLighting()
     setupOrb()
-    setupEyes()
+    setupFace()
     setupParticles()
   }
 
@@ -51,23 +58,38 @@ final class OrbScene {
     rmsOverride: Double?,
     mousePosition: NSPoint?
   ) {
-    let deltaTime = previousTime > 0 ? min(time - previousTime, 1.0 / 15.0) : 1.0 / 60.0
+    // Cap dt tighter than 1/15s — large steps made squash / hover / fidgets visibly jump.
+    let rawDt = previousTime > 0 ? time - previousTime : 1.0 / 60.0
+    let deltaTime = min(max(rawDt, 1.0 / 240.0), 1.0 / 40.0)
     previousTime = time
+
+    let activeRms = rmsOverride ?? features.rms
+
+    if !rmsFilterInitialized {
+      smoothedRms = activeRms
+      lastSmoothedRms = activeRms
+      rmsFilterInitialized = true
+    } else {
+      smoothedRms += (activeRms - smoothedRms) * min(1.0, deltaTime * 22.0)
+    }
 
     hoverPhase += CGFloat(deltaTime * 3.0)
     let hover = 0.025 * sin(hoverPhase)
     let isSpeaking = speechState != .idle || isListening
     let isUser = speechState == .userSpeaking || isListening
-    let activeRms = rmsOverride ?? features.rms
     let multiplier: CGFloat = isUser ? 0.75 : 0.35
     let cap: CGFloat = isUser ? 0.26 : 0.16
-    let pulseAmount: CGFloat = isSpeaking ? min(cap, CGFloat(activeRms) * multiplier) : 0.0
+    let pulseAmount: CGFloat = isSpeaking ? min(cap, CGFloat(smoothedRms) * multiplier) : 0.0
     let targetScale: CGFloat = 1.0 + pulseAmount
-    pulseScale = lerp(current: pulseScale, target: targetScale, amount: 0.2)
+    let pulseLerp = CGFloat(min(1.0, deltaTime * 12.0))
+    pulseScale = lerp(current: pulseScale, target: targetScale, amount: pulseLerp)
     let combinedScale = pulseScale
 
-    // Squash & stretch: driven by rate of change in audio energy
-    let rmsDerivative = deltaTime > 0 ? (activeRms - previousRms) / deltaTime : 0
+    // Squash & stretch from smoothed RMS slope (raw RMS spikes were causing stretch pops)
+    let rawDerivative =
+      deltaTime > 1e-6 ? (smoothedRms - lastSmoothedRms) / deltaTime : 0
+    lastSmoothedRms = smoothedRms
+    let rmsDerivative = max(-32.0, min(32.0, rawDerivative))
     let stretchAmount = Float(min(0.08, max(-0.08, rmsDerivative * 0.04)))
     let baseScale = Float(combinedScale)
     let targetScaleY = baseScale + stretchAmount
@@ -90,9 +112,10 @@ final class OrbScene {
       hover + CGFloat(fidget.positionOffset.y),
       CGFloat(fidget.positionOffset.z)
     )
+    let walkYaw = walkFacingYawRadians
     orbNode.eulerAngles = SCNVector3(
       CGFloat(fidget.rotationOffset.x),
-      CGFloat(fidget.rotationOffset.y),
+      CGFloat(fidget.rotationOffset.y) + walkYaw,
       CGFloat(fidget.rotationOffset.z)
     )
 
@@ -106,14 +129,15 @@ final class OrbScene {
       targetColor = isListening ? SIMD3(1.0, 0.25, 0.25) : SIMD3(0.2, 0.95, 0.55)
     }
 
-    currentColor = lerp(current: currentColor, target: targetColor, amount: 0.08)
+    let colorLerp = min(1.0, deltaTime * 5.5)
+    currentColor = lerp(current: currentColor, target: targetColor, amount: colorLerp)
     let baseColor = NSColor(
       calibratedRed: currentColor.x,
       green: currentColor.y,
       blue: currentColor.z,
       alpha: 1.0
     )
-    let glowBoost = CGFloat(min(1.0, 0.25 + (features.rms * 1.1)))
+    let glowBoost = CGFloat(min(1.0, 0.25 + (smoothedRms * 1.1)))
     orbNode.geometry?.firstMaterial?.diffuse.contents = baseColor
     orbNode.geometry?.firstMaterial?.emission.contents = baseColor.withAlphaComponent(glowBoost)
 
@@ -126,7 +150,7 @@ final class OrbScene {
     case .idle:
       targetLightColor = isListening ? SIMD3(1.0, 0.25, 0.25) : SIMD3(0.2, 0.95, 0.55)
     }
-    currentLightColor = lerp(current: currentLightColor, target: targetLightColor, amount: 0.08)
+    currentLightColor = lerp(current: currentLightColor, target: targetLightColor, amount: colorLerp)
     let lightColor = NSColor(
       calibratedRed: currentLightColor.x,
       green: currentLightColor.y,
@@ -159,9 +183,10 @@ final class OrbScene {
     // Use fidget gaze override if present, otherwise mouse position
     let effectiveMousePosition: NSPoint?
     if let gazeOverride = fidget.eyeGazeOverride {
+      let s = CGFloat(OrbEyes.maxPupilOffset)
       effectiveMousePosition = NSPoint(
-        x: CGFloat(gazeOverride.x / 0.03),  // Convert back to -1...1 range
-        y: CGFloat(gazeOverride.y / 0.03)
+        x: CGFloat(gazeOverride.x) / s,
+        y: CGFloat(gazeOverride.y) / s
       )
     } else {
       effectiveMousePosition = mousePosition
@@ -169,7 +194,14 @@ final class OrbScene {
 
     eyes.update(
       deltaTime: deltaTime, mousePosition: effectiveMousePosition, expression: eyeExpression)
-    eyes.updateLidColor(baseColor)
+
+    face.update(
+      deltaTime: deltaTime,
+      time: time,
+      speechState: speechState,
+      isListening: isListening,
+      eyeExpression: eyeExpression
+    )
 
     // Detect state transitions and trigger reactions
     if speechState != previousSpeechState {
@@ -213,10 +245,8 @@ final class OrbScene {
     }
 
     // Track state for transition detection
-    let activeRmsForTracking = rmsOverride ?? features.rms
     previousSpeechState = speechState
     previousListening = isListening
-    previousRms = activeRmsForTracking
   }
 
   func triggerDismissed() {
@@ -281,9 +311,11 @@ final class OrbScene {
     scene.rootNode.addChildNode(orbNode)
   }
 
-  private func setupEyes() {
+  private func setupFace() {
     orbNode.addChildNode(eyes.leftEyeNode)
     orbNode.addChildNode(eyes.rightEyeNode)
+    orbNode.addChildNode(face.leftBrowNode)
+    orbNode.addChildNode(face.rightBrowNode)
   }
 
   private func setupParticles() {

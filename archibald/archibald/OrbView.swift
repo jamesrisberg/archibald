@@ -3,12 +3,20 @@ import SceneKit
 import SwiftUI
 
 struct OrbView: View {
+  let orbWalkFacing: OrbWalkFacing
   @EnvironmentObject private var voiceSession: VoiceSessionManager
   @EnvironmentObject private var settings: AppSettings
-  @State private var introScale: CGFloat = 0.02
+  /// Slightly undersized at start so the window slide + scale read as one “hello” (not a pop from nothing).
+  @State private var introScale: CGFloat = 0.72
 
   var body: some View {
-    OrbSceneView(voiceSession: voiceSession, orbSize: settings.orbSize, isListening: settings.isListening, isOrbVisible: settings.isOrbVisible)
+    OrbSceneView(
+      voiceSession: voiceSession,
+      orbWalkFacing: orbWalkFacing,
+      orbSize: settings.orbSize,
+      isListening: settings.isListening,
+      isOrbVisible: settings.isOrbVisible
+    )
       .scaleEffect(introScale)
       .onAppear {
         runIntroAnimation()
@@ -23,12 +31,12 @@ struct OrbView: View {
   }
 
   private func runIntroAnimation() {
-    introScale = 0.02
-    withAnimation(.easeOut(duration: 0.35)) {
-      introScale = 1.08
+    introScale = 0.72
+    withAnimation(.easeOut(duration: 0.45)) {
+      introScale = 1.06
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-      withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+      withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
         introScale = 1.0
       }
     }
@@ -36,22 +44,33 @@ struct OrbView: View {
 
   private func runHideAnimation() {
     // Delay shrink to let the 3D sad-droop reaction play first
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-      withAnimation(.easeInOut(duration: 0.22)) {
-        introScale = 0.02
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      withAnimation(.easeInOut(duration: 0.28)) {
+        introScale = 0.72
       }
     }
   }
 }
 
+/// SCNView normally hit-tests as the deepest NSView under the cursor, which
+/// swallows mouse events before the SwiftUI `.onTapGesture` set on the panel's
+/// content view can fire. Returning nil from `hitTest(_:)` lets clicks fall
+/// through to the NSHostingView so SwiftUI's gesture recognizer claims them.
+private final class ClickThroughSCNView: SCNView {
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
+  }
+}
+
 private struct OrbSceneView: NSViewRepresentable {
   let voiceSession: VoiceSessionManager
+  let orbWalkFacing: OrbWalkFacing
   let orbSize: Double
   let isListening: Bool
   let isOrbVisible: Bool
 
   func makeNSView(context: Context) -> SCNView {
-    let view = SCNView()
+    let view = ClickThroughSCNView()
     view.scene = context.coordinator.orbScene.scene
     view.backgroundColor = .clear
     view.allowsCameraControl = false
@@ -63,17 +82,19 @@ private struct OrbSceneView: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: SCNView, context: Context) {
+    context.coordinator.orbWalkFacing = orbWalkFacing
     context.coordinator.updateSize(for: orbSize)
     context.coordinator.bindListening(isListening)
     context.coordinator.updateVisibility(isOrbVisible)
   }
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(voiceSession: voiceSession)
+    Coordinator(voiceSession: voiceSession, orbWalkFacing: orbWalkFacing)
   }
 
   final class Coordinator: NSObject, SCNSceneRendererDelegate {
     let orbScene = OrbScene()
+    var orbWalkFacing: OrbWalkFacing
     weak var scnView: SCNView?
     private var cancellables = Set<AnyCancellable>()
     private var latestFeatures = VoiceSessionManager.AudioFeatures(rms: 0, zcr: 0)
@@ -81,7 +102,8 @@ private struct OrbSceneView: NSViewRepresentable {
     private var latestListening = false
     private var latestInputLevel: Double = 0
 
-    init(voiceSession: VoiceSessionManager) {
+    init(voiceSession: VoiceSessionManager, orbWalkFacing: OrbWalkFacing) {
+      self.orbWalkFacing = orbWalkFacing
       super.init()
       voiceSession.$outputFeatures
         .receive(on: RunLoop.main)
@@ -132,6 +154,8 @@ private struct OrbSceneView: NSViewRepresentable {
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+      orbScene.walkFacingYawRadians = orbWalkFacing.yawRadians
+
       let rmsOverride: Double?
       if latestSpeechState == .userSpeaking || latestListening {
         rmsOverride = latestInputLevel

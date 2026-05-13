@@ -87,6 +87,8 @@ final class VoiceSessionManager: ObservableObject {
   private var smoothedOutputZcr: Double = 0
   private var responseDoneAt = Date.distantPast
   private var lastAudioEndAt = Date.distantPast
+  /// Lets last `input_audio_buffer.append` reach the server before `commit` (ordering matters).
+  private var finalizeTurnWorkItem: DispatchWorkItem?
   private var cancellables = Set<AnyCancellable>()
   private var wsLogEntries: [String] = []
   private var transcriptFileURL: URL?
@@ -108,6 +110,9 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   func startListening() {
+    finalizeTurnWorkItem?.cancel()
+    finalizeTurnWorkItem = nil
+
     if connectionState == .connected {
       setLastError("")
       isStopping = false
@@ -138,24 +143,39 @@ final class VoiceSessionManager: ObservableObject {
   func stopListening() {
     isStopping = true
     pendingStartCapture = false
-    if connectionState == .connected {
-      finalizeTurn()
-    }
+    finalizeTurnWorkItem?.cancel()
+    finalizeTurnWorkItem = nil
+
     currentListeningState = false
     setInputLevel(0)
     setOutputLevel(0)
     setIsRecording(false)
+
+    // Stop appending audio *before* commit so the server never sees append-after-commit.
     stopAudioCapture()
+
+    if connectionState == .connected {
+      let workItem = DispatchWorkItem { [weak self] in
+        guard let self else { return }
+        self.finalizeTurn()
+        self.finalizeTurnWorkItem = nil
+      }
+      finalizeTurnWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.commitFlushDelay, execute: workItem)
+    }
+
     stopEngineIfIdle(force: true)
   }
+
+  /// Small delay after removing the mic tap so the last append(s) are in flight before commit.
+  private static let commitFlushDelay: TimeInterval = 0.1
 
   private func bindSettings() {
     settings.$isListening
       .sink { [weak self] (isListening: Bool) in
         guard let self else { return }
-        DispatchQueue.main.async {
-          self.currentListeningState = isListening
-        }
+        // Must update before start/stop: `connect` uses `currentListeningState`; async here caused dropped connects.
+        self.currentListeningState = isListening
         if isListening {
           self.startListening()
         } else {
@@ -240,18 +260,30 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func sendSessionUpdate() {
+    var session: [String: Any] = [
+      "voice": settings.voice.rawValue,
+      "instructions": settings.systemPrompt,
+      "keep_context": true,
+      "modalities": ["audio", "text"],
+      "audio": [
+        "input": ["format": ["type": "audio/pcm", "rate": 24000]],
+        "output": ["format": ["type": "audio/pcm", "rate": 24000]],
+      ],
+    ]
+
+    if settings.fileCollectionsEnabled && !settings.collectionID.isEmpty {
+      session["tools"] = [
+        [
+          "type": "file_search",
+          "vector_store_ids": [settings.collectionID],
+          "max_num_results": 10,
+        ]
+      ]
+    }
+
     let config: [String: Any] = [
       "type": "session.update",
-      "session": [
-        "voice": settings.voice.rawValue,
-        "instructions": settings.systemPrompt,
-        "keep_context": true,
-        "modalities": ["audio", "text"],
-        "audio": [
-          "input": ["format": ["type": "audio/pcm", "rate": 24000]],
-          "output": ["format": ["type": "audio/pcm", "rate": 24000]],
-        ],
-      ],
+      "session": session,
     ]
 
     sendJSON(config)
@@ -262,8 +294,10 @@ final class VoiceSessionManager: ObservableObject {
       guard let self else { return }
       switch result {
       case .success(let message):
-        self.handleMessage(message)
-        self.receiveLoop()
+        DispatchQueue.main.async {
+          self.handleMessage(message)
+          self.receiveLoop()
+        }
       case .failure(let error):
         if self.connectionState == .connected && !self.isStopping {
           self.setLastError("WebSocket disconnected: \(error.localizedDescription)")
@@ -374,7 +408,7 @@ final class VoiceSessionManager: ObservableObject {
       if type.hasPrefix("response.") || type.hasPrefix("conversation.")
         || type.hasPrefix("input_audio_buffer.")
       {
-        setLastError("Last event: \(type)")
+        DebugLog.log("[Grok WS] unhandled event type: \(type)")
       }
       break
     }
@@ -770,14 +804,13 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func finalizeTurn() {
-    guard hasSentAudio else { return }
+    guard connectionState == .connected else { return }
     pendingResponseCreate = true
     sendJSON(["type": "input_audio_buffer.commit"])
     scheduleResponseCreateFallback()
   }
 
   private func sendResponseCreate() {
-    sendSessionUpdate()
     let response: [String: Any] = [
       "type": "response.create",
       "response": [
@@ -797,7 +830,7 @@ final class VoiceSessionManager: ObservableObject {
       self.sendResponseCreate()
     }
     pendingResponseTimer = workItem
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: workItem)
   }
 
   private func startPing() {
@@ -1052,6 +1085,8 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   func resetSession() {
+    finalizeTurnWorkItem?.cancel()
+    finalizeTurnWorkItem = nil
     pendingResponseTimer?.cancel()
     pendingResponseTimer = nil
     isStopping = false

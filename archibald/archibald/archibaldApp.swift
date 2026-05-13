@@ -11,15 +11,19 @@ import SwiftUI
 struct archibaldApp: App {
   @StateObject private var settings: AppSettings
   @StateObject private var voiceSession: VoiceSessionManager
+  @StateObject private var collectionSync: CollectionSyncEngine
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
   init() {
     let settings = AppSettings()
     let voiceSession = VoiceSessionManager(settings: settings)
+    let collectionSync = CollectionSyncEngine(settings: settings)
     _settings = StateObject(wrappedValue: settings)
     _voiceSession = StateObject(wrappedValue: voiceSession)
+    _collectionSync = StateObject(wrappedValue: collectionSync)
     appDelegate.settings = settings
     appDelegate.voiceSession = voiceSession
+    appDelegate.collectionSync = collectionSync
   }
 
   var body: some Scene {
@@ -97,6 +101,7 @@ struct archibaldApp: App {
       SettingsView()
         .environmentObject(settings)
         .environmentObject(voiceSession)
+        .environmentObject(collectionSync)
     }
   }
 }
