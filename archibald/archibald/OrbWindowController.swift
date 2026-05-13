@@ -318,17 +318,26 @@ final class OrbWindowController {
   }
 
   private func bindSettings() {
+    // dropFirst on all three: @Published emits the current value on subscribe,
+    // which on cold launch races the explicit setVisible(true) from AppDelegate.
+    // The cached value's deferred fire would snap the panel to rest mid-slide
+    // and kill the yaw timer, leaving the orb stuck facing inward. The initial
+    // state is already set up in init/updateFrame — these sinks are only for
+    // reacting to user changes.
     settings.$corner
+      .dropFirst()
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in self?.updateFrame() }
       .store(in: &cancellables)
 
     settings.$orbSize
+      .dropFirst()
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in self?.updateFrame() }
       .store(in: &cancellables)
 
     settings.$isOrbVisible
+      .dropFirst()
       .receive(on: RunLoop.main)
       .sink { [weak self] isVisible in self?.setVisible(isVisible) }
       .store(in: &cancellables)
