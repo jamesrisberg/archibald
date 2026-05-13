@@ -10,7 +10,7 @@ GITHUB_REPO="jamesrisberg/archibald"
 BUILD_DIR="build"
 ARCHIVE_PATH="${BUILD_DIR}/Archibald.xcarchive"
 EXPORT_PATH="${BUILD_DIR}/export"
-DMG_PATH="${BUILD_DIR}/Archibald.dmg"
+ZIP_PATH="${BUILD_DIR}/Archibald.zip"
 
 NOTARIZE="${NOTARIZE:-1}"
 
@@ -40,7 +40,7 @@ require_tool() {
 }
 
 require_tool xcodebuild
-require_tool hdiutil
+require_tool ditto
 require_tool xcrun
 require_tool gh
 
@@ -144,28 +144,31 @@ if [[ "${VERSION}" != "${RELEASE_VERSION}" ]]; then
   exit 1
 fi
 
-echo "==> Creating DMG"
-mkdir -p "${BUILD_DIR}/dmg"
-rm -rf "${BUILD_DIR}/dmg/Archibald.app"
-cp -R "${APP_PATH}" "${BUILD_DIR}/dmg/Archibald.app"
-hdiutil create -volname "Archibald" -srcfolder "${BUILD_DIR}/dmg" -ov -format UDZO "${DMG_PATH}"
-
 if [[ "${NOTARIZE}" == "1" ]]; then
+  echo "==> Zipping app for notarization"
+  NOTARIZE_ZIP="${BUILD_DIR}/Archibald-notarize.zip"
+  rm -f "${NOTARIZE_ZIP}"
+  ditto -c -k --keepParent "${APP_PATH}" "${NOTARIZE_ZIP}"
+
   echo "==> Notarizing"
-  xcrun notarytool submit "${DMG_PATH}" \
+  xcrun notarytool submit "${NOTARIZE_ZIP}" \
     --apple-id "${APPLE_ID}" \
     --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
     --team-id "${APPLE_TEAM_ID}" \
     --wait
 
-  echo "==> Stapling"
-  xcrun stapler staple "${DMG_PATH}"
+  echo "==> Stapling .app bundle"
+  xcrun stapler staple "${APP_PATH}"
 else
   echo "==> Skipping notarization (NOTARIZE=0)"
 fi
 
+echo "==> Creating distribution ZIP"
+rm -f "${ZIP_PATH}"
+ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+
 # Get file size
-DMG_SIZE=$(stat -f%z "${DMG_PATH}")
+DMG_SIZE=$(stat -f%z "${ZIP_PATH}")
 
 # Find sign_update tool and generate signature
 echo "==> Generating Sparkle signature"
@@ -178,17 +181,17 @@ if [[ -z "${SIGN_UPDATE}" ]]; then
 fi
 
 # Use archibald-specific signing key
-SPARKLE_SIG=$("${SIGN_UPDATE}" "${DMG_PATH}" --account archibald | grep -o 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
+SPARKLE_SIG=$("${SIGN_UPDATE}" "${ZIP_PATH}" --account archibald | grep -o 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
 echo "Signature: ${SPARKLE_SIG:0:20}..."
 
-# Create GitHub release and upload DMG
+# Create GitHub release and upload ZIP
 TAG="v${VERSION}"
 echo "==> Creating GitHub release ${TAG}"
 if gh release view "${TAG}" --repo "${GITHUB_REPO}" &>/dev/null; then
-  echo "Release ${TAG} already exists, uploading DMG..."
-  gh release upload "${TAG}" "${DMG_PATH}" --repo "${GITHUB_REPO}" --clobber
+  echo "Release ${TAG} already exists, uploading ZIP..."
+  gh release upload "${TAG}" "${ZIP_PATH}" --repo "${GITHUB_REPO}" --clobber
 else
-  gh release create "${TAG}" "${DMG_PATH}" \
+  gh release create "${TAG}" "${ZIP_PATH}" \
     --repo "${GITHUB_REPO}" \
     --title "Archibald ${VERSION}" \
     --notes "Release ${VERSION}" \
@@ -200,7 +203,7 @@ fi
 # Update appcast.xml
 echo "==> Updating appcast.xml"
 PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
-DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/Archibald.dmg"
+DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/Archibald.zip"
 
 # Create new item entry
 NEW_ITEM=$(cat <<EOF
@@ -264,7 +267,7 @@ fi
 echo ""
 echo "==> Done!"
 echo ""
-echo "Build:    ${DMG_PATH}"
+echo "Build:    ${ZIP_PATH}"
 echo "Version:  ${VERSION} (${BUILD_NUMBER})"
 echo "Release:  https://github.com/${GITHUB_REPO}/releases/tag/${TAG}"
 echo ""

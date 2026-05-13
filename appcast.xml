@@ -8,6 +8,27 @@
 
     <!-- Add new versions at the top -->
     <item>
+      <title>Version 0.2.0</title>
+      <description><![CDATA[
+        <h2>What&apos;s New in 0.2.0</h2>
+        <ul>
+          <li><strong>File Collections.</strong> Pick a folder; Archibald keeps it mirrored to an xAI Collection and the voice agent can search it during a conversation. Auto-creates the collection on first run; uses a security-scoped folder bookmark; watches the folder via FSEvents.</li>
+          <li><strong>Click the orb to start/stop recording.</strong> Fixed an event-routing bug where clicks were swallowed by the 3D view and by macOS dropping &quot;first clicks&quot; on the non-activating panel.</li>
+          <li><strong>Orb floats above other windows.</strong> No longer hides behind Finder, Chrome, etc.</li>
+          <li><strong>Show animation no longer gets stuck.</strong> Bringing the orb back with &#x2325;+&#92; after hiding now reliably plays the slide-in, even with rapid show/hide toggles.</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 13 May 2026 18:52:35 +0000</pubDate>
+      <sparkle:version>10</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/jamesrisberg/archibald/releases/download/v0.2.0/Archibald.zip"
+        sparkle:edSignature="I0amCu/8K2/KzAe262QKKTvx1DAthyf7Pmuqpyq3PeBVwVvfym3J9ErvhFzbZYFwDepMThc4McxcQLIqgL9jDg=="
+        length="2195176"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 0.1.3</title>
       <description><![CDATA[
         <h2>What&apos;s New in 0.1.3</h2>
