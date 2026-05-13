@@ -8,6 +8,24 @@
 
     <!-- Add new versions at the top -->
     <item>
+      <title>Version 0.2.1</title>
+      <description><![CDATA[
+        <h2>What&apos;s New in 0.2.1</h2>
+        <ul>
+          <li><strong>Fixed orb facing inward on first launch.</strong> On a cold start the entrance animation was getting interrupted by cached settings publishers, leaving Archibald frozen mid-pivot toward the screen center. He now finishes the slide-in and faces you straight on, same as a hide/show cycle.</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 13 May 2026 19:24:51 +0000</pubDate>
+      <sparkle:version>11</sparkle:version>
+      <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/jamesrisberg/archibald/releases/download/v0.2.1/Archibald.zip"
+        sparkle:edSignature="tCfgwfOt0eIPdds8QPMvlzoDkWj1Ih7t6d1/sjEib0rcNkun4wIVn/fikY4BPKbN3lgNleB+VxnHZHkwdkIODw=="
+        length="2135774"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 0.2.0</title>
       <description><![CDATA[
         <h2>What&apos;s New in 0.2.0</h2>
