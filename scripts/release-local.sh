@@ -41,6 +41,7 @@ require_tool() {
 
 require_tool xcodebuild
 require_tool ditto
+require_tool zip
 require_tool xcrun
 require_tool gh
 
@@ -164,8 +165,17 @@ else
 fi
 
 echo "==> Creating distribution ZIP"
+# Important: use /usr/bin/zip -X (skip extended attributes / resource forks)
+# rather than `ditto -c -k --keepParent`. ditto bakes xattrs as `._*`
+# AppleDouble entries inside the zip — when extracted by anything other than
+# `ditto -x -k` (Safari, Archive Utility on Tahoe, Sparkle's installer), those
+# expand into real files inside the bundle and corrupt the codesign
+# ("could not verify it's not malware" on launch).
 rm -f "${ZIP_PATH}"
-ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+ZIP_ABS_PATH="$(cd "$(dirname "${ZIP_PATH}")" && pwd)/$(basename "${ZIP_PATH}")"
+APP_PARENT_DIR="$(cd "$(dirname "${APP_PATH}")" && pwd)"
+APP_BASENAME="$(basename "${APP_PATH}")"
+( cd "${APP_PARENT_DIR}" && /usr/bin/zip --symlinks --recurse-paths -X -q "${ZIP_ABS_PATH}" "${APP_BASENAME}" )
 
 # Get file size
 DMG_SIZE=$(stat -f%z "${ZIP_PATH}")
