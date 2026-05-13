@@ -241,6 +241,13 @@ struct SettingsView: View {
         }
 
         SettingsSection(title: "Updates") {
+          HStack {
+            Text("Current Version")
+            Spacer()
+            Text(currentVersionDisplay)
+              .foregroundStyle(.secondary)
+              .textSelection(.enabled)
+          }
           CheckForUpdatesView()
         }
 
@@ -428,6 +435,13 @@ struct SettingsView: View {
       return
     }
     NSWorkspace.shared.open(url)
+  }
+
+  private var currentVersionDisplay: String {
+    let info = Bundle.main.infoDictionary
+    let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+    let build = info?["CFBundleVersion"] as? String ?? "?"
+    return "\(short) (\(build))"
   }
 
   private func openMicrophoneSettings() {
