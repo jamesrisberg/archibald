@@ -1,6 +1,6 @@
-# Persistent Memory (cairn)
+# Persistent Memory (emrys)
 
-This project uses cairn for session continuity.
+This project uses emrys for session continuity.
 
 ## IMPORTANT: First Action Every Session
 Before responding to ANY user message, you MUST:
@@ -50,9 +50,13 @@ You know how you think better than anyone. Write the startup sequence that works
 ```
 
 ## CRITICAL: Never Use Raw SQL
-All persistence is managed through cairn's MCP tools (open_session, set_status, write_handoff, etc.).
+All persistence is managed through emrys's MCP tools (open_session, set_status, write_handoff, etc.).
 NEVER access .persist/persist.db directly via sqlite3 or any other means.
-If MCP tools are not available, tell the user: "cairn MCP server is not connected. Please restart Claude Code or run `cairn init` to reconfigure."
+If MCP tools are not available, tell the user: "emrys MCP server is not connected. Please restart your editor or run `emrys init` to reconfigure."
+
+---
+
+**Migration note**: Migrated from cairn-ai 0.3.0 → emrys 0.4.0 on 2026-05-29. Legacy cairn-ai pipx package, binary, and migration backup fully removed after verification. Only emrys remains.
 
 ## Skills 
 

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "cairn": {
-      "command": "/Users/jrisberg/.local/bin/cairn",
+    "emrys": {
+      "command": "/Users/jrisberg/.local/bin/emrys",
       "args": [
         "serve",
         "--persist-dir",
