@@ -1,97 +1,27 @@
 import Foundation
 
-struct GrokSessionConfig: Codable {
-  struct AudioFormat: Codable {
-    struct Format: Codable {
-      let type: String
-      let rate: Int?
+/// Endpoint builder for xAI's realtime voice agent API.
+///
+/// Auth is the raw API key as `Authorization: Bearer` — the documented scheme
+/// for clients that hold their own key. (The `client_secrets` ephemeral-token
+/// flow plus the `xai-client-secret.{token}` WebSocket subprotocol exists for
+/// browser clients that must not see the long-lived key; a native app whose
+/// user pastes their own key gains nothing from it.)
+enum GrokVoiceAPI {
+  /// Alias that always tracks xAI's newest voice model, so model deprecations
+  /// (e.g. grok-voice-fast-1.0 → grok-voice-think-fast-1.0) don't strand us.
+  static let model = "grok-voice-latest"
+
+  /// Realtime session URL. Pass `conversationID` when reconnecting to resume
+  /// a prior conversation (requires `resumption.enabled` in the session config;
+  /// server keeps history for 30 minutes of inactivity).
+  static func sessionURL(conversationID: String? = nil) -> URL {
+    var components = URLComponents(string: "wss://api.x.ai/v1/realtime")!
+    var items = [URLQueryItem(name: "model", value: model)]
+    if let conversationID, !conversationID.isEmpty {
+      items.append(URLQueryItem(name: "conversation_id", value: conversationID))
     }
-
-    let format: Format
-  }
-
-  let type: String
-  let session: Session
-
-  struct Session: Codable {
-    let voice: String
-    let instructions: String
-    let audio: Audio
-  }
-
-  struct Audio: Codable {
-    let input: AudioFormat
-    let output: AudioFormat
-  }
-}
-
-final class GrokVoiceClient {
-  let sessionEndpoint: URL
-
-  init(sessionEndpoint: URL = URL(string: "wss://api.x.ai/v1/realtime")!) {
-    self.sessionEndpoint = sessionEndpoint
-  }
-
-  func fetchEphemeralToken(apiKey: String) async throws -> String {
-    guard let url = URL(string: "https://api.x.ai/v1/realtime/client_secrets") else {
-      throw URLError(.badURL)
-    }
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    request.httpBody = try? JSONSerialization.data(withJSONObject: [
-      "expires_after": ["seconds": 300]
-    ])
-
-    logHttpRequest("POST", url: url, body: request.httpBody)
-    let (data, response) = try await URLSession.shared.data(for: request)
-    logHttpResponse(response, data: data)
-    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-      let body = String(decoding: data, as: UTF8.self)
-      throw NSError(
-        domain: "GrokVoiceClient",
-        code: http.statusCode,
-        userInfo: [NSLocalizedDescriptionKey: "Token request failed (\(http.statusCode)): \(body)"]
-      )
-    }
-    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    if let token = json?["client_secret"] as? String {
-      return token
-    }
-    if let secret = json?["client_secret"] as? [String: Any],
-      let token = secret["value"] as? String
-    {
-      return token
-    }
-    if let token = json?["value"] as? String {
-      return token
-    }
-    let body = String(decoding: data, as: UTF8.self)
-    throw NSError(
-      domain: "GrokVoiceClient",
-      code: -1,
-      userInfo: [NSLocalizedDescriptionKey: "Unexpected token response: \(body)"]
-    )
-  }
-
-  private func logHttpRequest(_ method: String, url: URL, body: Data?) {
-    DebugLog.log("[Grok HTTP OUT] \(method) \(url.absoluteString)")
-    if let body, let bodyString = String(data: body, encoding: .utf8) {
-      DebugLog.log("[Grok HTTP OUT] Body \(bodyString)")
-    }
-  }
-
-  private func logHttpResponse(_ response: URLResponse, data: Data) {
-    if let http = response as? HTTPURLResponse {
-      DebugLog.log("[Grok HTTP IN] Status \(http.statusCode)")
-    } else {
-      DebugLog.log("[Grok HTTP IN] Response \(response)")
-    }
-    if let body = String(data: data, encoding: .utf8) {
-      let maxLength = 1200
-      let truncated = body.count > maxLength ? String(body.prefix(maxLength)) + "…<truncated>" : body
-      DebugLog.log("[Grok HTTP IN] Body \(truncated)")
-    }
+    components.queryItems = items
+    return components.url!
   }
 }

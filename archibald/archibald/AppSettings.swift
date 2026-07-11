@@ -29,6 +29,10 @@ final class AppSettings: ObservableObject {
     case leo = "Leo"
 
     var id: String { rawValue }
+
+    /// Wire value for the realtime API — the docs list voices lowercase
+    /// (`ara`, `eve`, …); rawValue stays capitalized for display/persistence.
+    var apiValue: String { rawValue.lowercased() }
   }
 
   enum HotKeyOption: String, CaseIterable, Identifiable {
@@ -122,7 +126,7 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var apiKey: String {
-    didSet { defaults.set(apiKey, forKey: Keys.apiKey) }
+    didSet { KeychainStore.set(apiKey, forKey: Keys.apiKey) }
   }
 
   @Published var debugLogging: Bool {
@@ -177,7 +181,7 @@ final class AppSettings: ObservableObject {
   /// xAI Management API key — separate from the voice `apiKey`. Required for
   /// creating collections and uploading/attaching files at management-api.x.ai.
   @Published var xaiManagementAPIKey: String {
-    didSet { defaults.set(xaiManagementAPIKey, forKey: Keys.xaiManagementAPIKey) }
+    didSet { KeychainStore.set(xaiManagementAPIKey, forKey: Keys.xaiManagementAPIKey) }
   }
 
   /// Display path for the synced folder. Read-only access — actual filesystem
@@ -250,7 +254,7 @@ final class AppSettings: ObservableObject {
       defaults.string(forKey: Keys.systemPrompt)
       ?? "You are Archibald, a concise desktop assistant."
 
-    apiKey = defaults.string(forKey: Keys.apiKey) ?? ""
+    apiKey = Self.migratedSecret(forKey: Keys.apiKey, defaults: defaults)
 
     debugLogging = defaults.object(forKey: Keys.debugLogging) as? Bool ?? true
 
@@ -272,12 +276,27 @@ final class AppSettings: ObservableObject {
     agentWorkingDirectoryPath = defaults.string(forKey: Keys.agentWorkingDirectoryPath) ?? ""
 
     fileCollectionsEnabled = defaults.object(forKey: Keys.fileCollectionsEnabled) as? Bool ?? false
-    xaiManagementAPIKey = defaults.string(forKey: Keys.xaiManagementAPIKey) ?? ""
+    xaiManagementAPIKey = Self.migratedSecret(forKey: Keys.xaiManagementAPIKey, defaults: defaults)
     collectionFolderPath = defaults.string(forKey: Keys.collectionFolderPath) ?? ""
     collectionFolderBookmark = defaults.data(forKey: Keys.collectionFolderBookmark)
     collectionID = defaults.string(forKey: Keys.collectionID) ?? ""
 
     DebugLog.isEnabled = debugLogging
+  }
+
+  /// Reads a secret from the Keychain, migrating (and scrubbing) any legacy
+  /// plaintext copy left in UserDefaults by earlier versions.
+  private static func migratedSecret(forKey key: String, defaults: UserDefaults) -> String {
+    if let existing = KeychainStore.string(forKey: key), !existing.isEmpty {
+      defaults.removeObject(forKey: key)
+      return existing
+    }
+    if let legacy = defaults.string(forKey: key), !legacy.isEmpty {
+      KeychainStore.set(legacy, forKey: key)
+      defaults.removeObject(forKey: key)
+      return legacy
+    }
+    return ""
   }
 
   static func commaSeparatedArguments(_ string: String) -> [String] {

@@ -209,9 +209,12 @@ final class CollectionSyncEngine: ObservableObject {
       await setStatus(.syncing(progress: "Uploading \(relPath) (\(done + 1)/\(total))"))
       guard let info = local[relPath] else { continue }
       do {
-        // Replace pattern: detach old (if any) → upload → attach.
+        // Replace pattern: detach old (if any) → upload → attach. A failed
+        // detach must fail the whole replace — uploading anyway would leave
+        // the stale document attached alongside the new one. The manifest is
+        // untouched on failure, so the next reconcile retries.
         if let old = manifest.entries[relPath] {
-          try? await api.detach(collectionID: collectionID, fileID: old.fileID)
+          try await api.detach(collectionID: collectionID, fileID: old.fileID)
         }
         let fileID = try await api.uploadFile(localURL: info.url)
         try await api.attach(collectionID: collectionID, fileID: fileID)

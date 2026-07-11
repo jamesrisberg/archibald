@@ -1,8 +1,11 @@
 import Foundation
 
 /// Thin async client over xAI's Collections endpoints. Two hosts, two keys:
-/// - `management-api.x.ai` with the management key: create/attach/detach.
-/// - `api.x.ai` with the regular API key: upload, search.
+/// - `management-api.x.ai` with the management key: create collections, attach/detach documents.
+/// - `api.x.ai` with the regular API key: file upload.
+/// Retrieval happens server-side via the voice session's `file_search` tool;
+/// there's also a `POST api.x.ai/v1/documents/search` endpoint if a text-side
+/// search path is ever needed.
 struct CollectionAPI {
   enum APIError: LocalizedError {
     case missingManagementKey
@@ -40,7 +43,8 @@ struct CollectionAPI {
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try JSONSerialization.data(withJSONObject: ["collection_name": name])
     let json = try await sendJSON(req)
-    guard let id = (json["id"] as? String) ?? (json["collection_id"] as? String) else {
+    // Docs specify `collection_id`; `id` kept as a defensive fallback.
+    guard let id = (json["collection_id"] as? String) ?? (json["id"] as? String) else {
       throw APIError.decoding("create collection: no id field in \(json)")
     }
     return id

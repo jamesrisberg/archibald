@@ -15,6 +15,9 @@ final class VoiceSessionManager: ObservableObject {
   @Published private(set) var outputLevel: Double = 0
   @Published private(set) var outputFeatures = AudioFeatures(rms: 0, zcr: 0)
   @Published private(set) var lastTranscript: String = ""
+  /// Cumulative in-progress transcription of what the user is saying
+  /// (server may revise earlier words). Cleared once the utterance completes.
+  @Published private(set) var liveUserTranscript: String = ""
   @Published private(set) var conversationTranscript: String = ""
   @Published private(set) var lastError: String = ""
   @Published private(set) var serverVoice: String = ""
@@ -94,6 +97,16 @@ final class VoiceSessionManager: ObservableObject {
   private var lastAudioEndAt = Date.distantPast
   /// Lets last `input_audio_buffer.append` reach the server before `commit` (ordering matters).
   private var finalizeTurnWorkItem: DispatchWorkItem?
+  /// Conversation id from `conversation.created`; reused via `?conversation_id=`
+  /// to resume history when the socket drops mid-conversation.
+  private var conversationID = ""
+  /// True once the server has confirmed the session (session.created/updated).
+  private var sessionConfirmed = false
+  private var sessionCreatedFallback: DispatchWorkItem?
+  private var reconnectAttempts = 0
+  private static let maxReconnectAttempts = 3
+  /// Continuations parked in `connect` until the session is confirmed or fails.
+  private var connectWaiters: [CheckedContinuation<Void, Never>] = []
   private var cancellables = Set<AnyCancellable>()
   private var wsLogEntries: [String] = []
   private var transcriptFileURL: URL?
@@ -124,6 +137,15 @@ final class VoiceSessionManager: ObservableObject {
       hasSentAudio = false
       setIsRecording(true)
       startAudioCapture()
+      return
+    }
+    if connectionState == .connecting {
+      // A (re)connect is in flight; let it start capture once the session lands.
+      setLastError("")
+      isStopping = false
+      hasSentAudio = false
+      setIsRecording(true)
+      pendingStartCapture = true
       return
     }
     guard connectionState == .idle || connectionState == .failed else { return }
@@ -221,55 +243,113 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func connect(withAudio: Bool) async {
-    guard connectionState == .idle else { return }
+    guard connectionState == .idle || connectionState == .failed else { return }
     guard currentListeningState || !withAudio else { return }
     setConnectionState(.connecting)
     setLastError("")
 
-    do {
-      let apiKey = settings.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-      guard !apiKey.isEmpty else {
-        setConnectionState(.failed)
-        setLastError("API key is required.")
-        await MainActor.run {
-          settings.isListening = false
-        }
-        return
-      }
-
-      let client = GrokVoiceClient()
-      let token = try await client.fetchEphemeralToken(apiKey: apiKey)
-
-      var request = URLRequest(url: client.sessionEndpoint)
-      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-      let task = URLSession.shared.webSocketTask(with: request)
-      webSocketTask = task
-      task.resume()
-      setConnectionState(.connected)
-      startTranscriptSession()
-
-      pendingStartCapture = withAudio
-      sendSessionUpdate()
-      receiveLoop()
-      startPing()
-    } catch {
+    let apiKey = settings.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    guard !apiKey.isEmpty else {
       setConnectionState(.failed)
-      let message = (error as NSError).localizedDescription
-      setLastError("Failed to connect: \(message)")
+      setLastError("API key is required.")
       await MainActor.run {
         settings.isListening = false
+      }
+      return
+    }
+
+    reconnectAttempts = 0
+    conversationID = ""
+    pendingStartCapture = withAudio
+    startTranscriptSession()
+    openWebSocket(resuming: false)
+    await waitUntilSessionSettled()
+  }
+
+  /// Opens (or reopens) the realtime socket and arms the receive/ping loops.
+  /// `resuming` reattaches to the current conversation via `?conversation_id=`.
+  private func openWebSocket(resuming: Bool) {
+    let apiKey = settings.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    let url = GrokVoiceAPI.sessionURL(conversationID: resuming ? conversationID : nil)
+    var request = URLRequest(url: url)
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+    sessionConfirmed = false
+    let task = URLSession.shared.webSocketTask(with: request)
+    webSocketTask = task
+    task.resume()
+    sendSessionUpdate()
+    receiveLoop()
+    startPing()
+    scheduleSessionConfirmationFallback()
+  }
+
+  /// Marks the session live once the server confirms it. Until then the state
+  /// stays `.connecting` — `.connected` is no longer set optimistically.
+  private func markSessionReady() {
+    sessionCreatedFallback?.cancel()
+    sessionCreatedFallback = nil
+    guard !sessionConfirmed else { return }
+    sessionConfirmed = true
+    reconnectAttempts = 0
+    // Always called on the main queue; assign directly so the state is
+    // visible before any parked `connect` waiter resumes and reads it.
+    connectionState = .connected
+    flushConnectWaiters()
+    // conversation.created is the normal capture trigger, but a resumed
+    // conversation may not replay it — start capture anyway shortly after.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+      guard let self, self.pendingStartCapture, self.connectionState == .connected,
+        self.currentListeningState
+      else { return }
+      self.pendingStartCapture = false
+      self.startAudioCapture()
+    }
+  }
+
+  /// The docs promise a `session.created` greeting; if the server ever stops
+  /// sending one, degrade to the old optimistic behavior instead of hanging.
+  private func scheduleSessionConfirmationFallback() {
+    sessionCreatedFallback?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, !self.sessionConfirmed else { return }
+      guard self.webSocketTask?.state == .running else { return }
+      DebugLog.log("[Grok WS] no session.created within 3s; assuming connected")
+      self.markSessionReady()
+    }
+    sessionCreatedFallback = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+  }
+
+  private func waitUntilSessionSettled() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      DispatchQueue.main.async {
+        if self.sessionConfirmed || self.connectionState == .failed {
+          continuation.resume()
+        } else {
+          self.connectWaiters.append(continuation)
+        }
       }
     }
   }
 
+  private func flushConnectWaiters() {
+    let waiters = connectWaiters
+    connectWaiters = []
+    waiters.forEach { $0.resume() }
+  }
+
   private func sendSessionUpdate() {
     var session: [String: Any] = [
-      "voice": settings.voice.rawValue,
+      "voice": settings.voice.apiValue,
       "instructions": settings.systemPrompt,
-      "keep_context": true,
-      "modalities": ["audio", "text"],
+      // Hands-free turns rely on the server closing the user's turn
+      // (speech_stopped → response); pin that explicitly instead of
+      // inheriting it as the implicit default.
+      "turn_detection": ["type": "server_vad"],
+      // Lets a dropped socket reconnect with ?conversation_id= and keep
+      // the conversation history (server holds it for 30 min).
+      "resumption": ["enabled": true],
       "audio": [
         "input": ["format": ["type": "audio/pcm", "rate": 24000]],
         "output": ["format": ["type": "audio/pcm", "rate": 24000]],
@@ -295,23 +375,62 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func receiveLoop() {
-    webSocketTask?.receive { [weak self] result in
+    guard let task = webSocketTask else { return }
+    task.receive { [weak self] result in
       guard let self else { return }
-      switch result {
-      case .success(let message):
-        DispatchQueue.main.async {
+      DispatchQueue.main.async {
+        // A reconnect may have swapped the socket; stale callbacks must not
+        // re-arm the loop or report failures for a task we abandoned.
+        guard task === self.webSocketTask else { return }
+        switch result {
+        case .success(let message):
           self.handleMessage(message)
           self.receiveLoop()
-        }
-      case .failure(let error):
-        if self.connectionState == .connected && !self.isStopping {
-          self.setLastError("WebSocket disconnected: \(error.localizedDescription)")
-        }
-        self.setConnectionState(.failed)
-        Task { @MainActor in
-          self.settings.isListening = false
+        case .failure(let error):
+          self.handleSocketFailure("WebSocket disconnected: \(error.localizedDescription)")
         }
       }
+    }
+  }
+
+  /// Main-queue only. Tears down the dead socket, then either schedules a
+  /// resuming reconnect or surfaces the failure and stops listening.
+  private func handleSocketFailure(_ description: String) {
+    stopPing()
+    webSocketTask = nil
+    sessionConfirmed = false
+    sessionCreatedFallback?.cancel()
+    sessionCreatedFallback = nil
+
+    let shouldReconnect =
+      currentListeningState && !isStopping && reconnectAttempts < Self.maxReconnectAttempts
+    guard shouldReconnect else {
+      if currentListeningState && !isStopping {
+        setLastError(description)
+      }
+      setConnectionState(.failed)
+      flushConnectWaiters()
+      Task { @MainActor in
+        self.settings.isListening = false
+      }
+      return
+    }
+
+    reconnectAttempts += 1
+    setConnectionState(.connecting)
+    let delay = pow(2.0, Double(reconnectAttempts - 1))  // 1s, 2s, 4s
+    DebugLog.log(
+      "[Grok WS] reconnect \(reconnectAttempts)/\(Self.maxReconnectAttempts) in \(delay)s — \(description)"
+    )
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+      guard let self, self.webSocketTask == nil else { return }
+      guard self.currentListeningState, !self.isStopping else {
+        // User stopped listening while we waited; leave a resumable state.
+        self.setConnectionState(.failed)
+        self.flushConnectWaiters()
+        return
+      }
+      self.openWebSocket(resuming: true)
     }
   }
 
@@ -366,9 +485,20 @@ final class VoiceSessionManager: ObservableObject {
           self.lastTranscript += delta
         }
       }
+    case "conversation.item.input_audio_transcription.updated":
+      // xAI's stand-in for OpenAI's transcription delta: cumulative text for
+      // the in-progress utterance, allowed to revise earlier words.
+      if let transcript = json["transcript"] as? String {
+        DispatchQueue.main.async {
+          self.liveUserTranscript = transcript
+        }
+      }
     case "conversation.item.input_audio_transcription.completed":
       if let transcript = json["transcript"] as? String {
         appendTranscript(role: "You", text: transcript)
+      }
+      DispatchQueue.main.async {
+        self.liveUserTranscript = ""
       }
     case "error":
       setAwaitingResponse(false)
@@ -388,7 +518,15 @@ final class VoiceSessionManager: ObservableObject {
       isPlayingResponse = false
       lastAudioEndAt = Date()
       break
+    case "session.created":
+      markSessionReady()
     case "conversation.created":
+      if let conversation = json["conversation"] as? [String: Any],
+        let id = conversation["id"] as? String
+      {
+        conversationID = id
+      }
+      markSessionReady()
       if pendingStartCapture {
         pendingStartCapture = false
         startAudioCapture()
@@ -407,6 +545,8 @@ final class VoiceSessionManager: ObservableObject {
         self.lastTranscript = ""
       }
     case "session.updated":
+      // The server answered our session.update — definitely live.
+      markSessionReady()
       if let session = json["session"] as? [String: Any],
         let voice = session["voice"] as? String
       {
@@ -844,15 +984,8 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func sendResponseCreate() {
-    let response: [String: Any] = [
-      "type": "response.create",
-      "response": [
-        "modalities": ["audio", "text"],
-        "instructions": settings.systemPrompt,
-        "voice": settings.voice.rawValue,
-      ],
-    ]
-    sendJSON(response)
+    // Bare event — instructions/voice/output shape all live on the session.
+    sendJSON(["type": "response.create"])
   }
 
   private func scheduleResponseCreateFallback() {
@@ -872,13 +1005,12 @@ final class VoiceSessionManager: ObservableObject {
     timer.schedule(deadline: .now() + 10, repeating: 10)
     timer.setEventHandler { [weak self] in
       guard let self, self.connectionState == .connected else { return }
-      self.webSocketTask?.sendPing { [weak self] error in
-        guard let self else { return }
-        if let error {
-          self.setLastError("WebSocket ping failed: \(error.localizedDescription)")
-          Task { @MainActor in
-            self.settings.isListening = false
-          }
+      guard let task = self.webSocketTask else { return }
+      task.sendPing { [weak self] error in
+        guard let self, let error else { return }
+        DispatchQueue.main.async {
+          guard task === self.webSocketTask else { return }
+          self.handleSocketFailure("WebSocket ping failed: \(error.localizedDescription)")
         }
       }
     }
@@ -895,10 +1027,15 @@ final class VoiceSessionManager: ObservableObject {
     guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
     guard webSocketTask?.state == .running else { return }
     logOutgoingEvent(data)
+    let logSendError: (Error?) -> Void = { error in
+      if let error {
+        DebugLog.log("[Grok WS] send failed: \(error.localizedDescription)")
+      }
+    }
     if let text = String(data: data, encoding: .utf8) {
-      webSocketTask?.send(.string(text)) { _ in }
+      webSocketTask?.send(.string(text), completionHandler: logSendError)
     } else {
-      webSocketTask?.send(.data(data)) { _ in }
+      webSocketTask?.send(.data(data), completionHandler: logSendError)
     }
   }
 
@@ -1081,6 +1218,7 @@ final class VoiceSessionManager: ObservableObject {
   func clearTranscript() {
     DispatchQueue.main.async {
       self.lastTranscript = ""
+      self.liveUserTranscript = ""
       self.conversationTranscript = ""
     }
     if let url = transcriptFileURL {
@@ -1122,17 +1260,24 @@ final class VoiceSessionManager: ObservableObject {
     finalizeTurnWorkItem = nil
     pendingResponseTimer?.cancel()
     pendingResponseTimer = nil
+    sessionCreatedFallback?.cancel()
+    sessionCreatedFallback = nil
     isStopping = false
     hasSentAudio = false
     pendingStartCapture = false
     pendingResponseCreate = false
+    sessionConfirmed = false
+    reconnectAttempts = 0
+    conversationID = ""
     stopPing()
     stopWebSocket()
     stopAudio()
     setConnectionState(.idle)
     setLastError("")
+    flushConnectWaiters()
     DispatchQueue.main.async {
       self.lastTranscript = ""
+      self.liveUserTranscript = ""
       self.conversationTranscript = ""
     }
     transcriptFileURL = nil
