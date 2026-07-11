@@ -1,6 +1,6 @@
 ---
 name: release
-description: Build, sign, notarize, and release a new version of Archibald. Runs the local release script, updates appcast.xml with release notes, commits, pushes, and publishes the GitHub release.
+description: Build, sign, notarize, and release a new version of Archibald. Runs the local release script, updates docs/appcast.xml with release notes, commits, pushes, and publishes the GitHub release.
 ---
 
 # Release Skill
@@ -38,7 +38,7 @@ This script will:
 - Notarize and staple (unless NOTARIZE=0)
 - Generate a Sparkle signature
 - Create a GitHub release (draft) and upload the DMG
-- Update appcast.xml with a placeholder release notes entry
+- Update docs/appcast.xml with a placeholder release notes entry
 
 **IMPORTANT**: This step is long-running (several minutes for build + notarization). Use a generous timeout (600000ms / 10 minutes). Run it in the foreground so you can monitor output.
 
@@ -53,14 +53,14 @@ git log --oneline $(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo HE
 
 Use their response to write proper release notes.
 
-### 5. Update appcast.xml release notes
+### 5. Update docs/appcast.xml release notes
 
-The script already inserted a new `<item>` entry in `appcast.xml` with placeholder notes (`Update release notes here`). Edit the `<description>` block of the **first** (newest) `<item>` to contain the actual release notes the user provided, formatted as an HTML list inside the existing `<![CDATA[...]]>` block.
+The script already inserted a new `<item>` entry in `docs/appcast.xml` with placeholder notes (`Update release notes here`). Edit the `<description>` block of the **first** (newest) `<item>` to contain the actual release notes the user provided, formatted as an HTML list inside the existing `<![CDATA[...]]>` block.
 
 ### 6. Commit and push
 
 Stage and commit the changed files:
-- `appcast.xml`
+- `docs/appcast.xml`
 - `archibald/archibald.xcodeproj/project.pbxproj`
 
 Use commit message: `release vX.Y.Z`

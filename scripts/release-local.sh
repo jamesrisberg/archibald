@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="archibald"
 PROJECT_PATH="archibald/archibald.xcodeproj"
 SCHEME="archibald"
-APPCAST_PATH="appcast.xml"
+APPCAST_PATH="docs/appcast.xml"
 GITHUB_REPO="jamesrisberg/archibald"
 
 BUILD_DIR="build"
