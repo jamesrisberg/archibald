@@ -8,6 +8,33 @@
 
     <!-- Add new versions at the top -->
     <item>
+      <title>Version 0.3.0</title>
+      <description><![CDATA[
+        <h2>What&apos;s New in 0.3.0 — Archibald is alive</h2>
+        <ul>
+          <li><strong>He blinks now.</strong> Natural, irregular blinks — quick to close, slower to open, the occasional double-blink — and heavier lids as he gets drowsy.</li>
+          <li><strong>He visibly thinks.</strong> After you finish talking, Archibald turns a soft violet, knits his brows, and glances up-and-aside while composing his reply — no more dead air.</li>
+          <li><strong>Polite eyes.</strong> Instead of staring at your cursor nonstop, he holds your gaze a few seconds, glances away, and re-engages — with quick saccades instead of dreamy drifting.</li>
+          <li><strong>A real mood.</strong> One emotional engine now drives his breathing, blink rate, fidget energy, and colors. Ignore him long enough and he falls asleep (dark-slit eyes, slow breaths); summon him and he startles awake.</li>
+          <li><strong>Listening is warm amber now</strong> instead of alarm-red, and losing the connection gets a confused head-shake and slate dimming instead of silence.</li>
+          <li><strong>Expressive brows while speaking</strong> — they lift with his volume and flutter with the texture of his voice.</li>
+          <li><strong>He stays out of your way.</strong> When you're actively working (fast cursor movement), he suppresses his idle fidgets. Reduce Motion is now respected across all animations.</li>
+          <li><strong>API keys moved to the macOS Keychain.</strong> Existing keys migrate automatically and the plaintext copies are scrubbed from preferences.</li>
+          <li><strong>Sturdier connection.</strong> Auto-reconnect with conversation resume when the socket drops, plus live in-progress transcription of what you're saying.</li>
+          <li>Assorted animation fixes: reactions ease out instead of snapping, wide-eyed attention now lasts the whole time he's listening.</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 11 Jul 2026 04:34:14 +0000</pubDate>
+      <sparkle:version>12</sparkle:version>
+      <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/jamesrisberg/archibald/releases/download/v0.3.0/Archibald.zip"
+        sparkle:edSignature="x1uHDfWHhoK0ZZ3IsnKXFUuYRELvPzl9sMG4x+I4epWc1eG3ImlwaBSfFs6tEqtdDqmhYUzWCdOMhDzIlmg4Aw=="
+        length="2155110"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 0.2.1</title>
       <description><![CDATA[
         <h2>What&apos;s New in 0.2.1</h2>
