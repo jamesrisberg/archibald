@@ -15,6 +15,7 @@ final class OrbScene {
   private var previousTime: TimeInterval = 0
   private var previousSpeechState: VoiceSessionManager.SpeechState = .idle
   private var previousListening = false
+  private var previousConnectionFailed = false
   /// Smoothed RMS for squash/pulse — raw audio jumps cause visible stutter on the derivative.
   private var smoothedRms: Double = 0
   private var lastSmoothedRms: Double = 0
@@ -27,6 +28,16 @@ final class OrbScene {
   private let eyes = OrbEyes(parentRadius: 0.6)
   private let face = OrbFaceFeatures(parentRadius: 0.6)
   private var idleDuration: TimeInterval = 0
+
+  // Emotional spine + involuntary signals
+  private let affect = OrbAffect()
+  private let blinkController = OrbBlinkController()
+  private let gazeController = OrbGazeController()
+  private var previousExpression: OrbEyes.Expression = .neutral
+  private var thinkingAmount: CGFloat = 0
+  /// Attention budget: how busy the user seems (mouse velocity proxy). High → sit still.
+  private var busyMeter: Float = 0
+  private var lastMouseForVelocity: NSPoint?
 
   // Fidgets
   private let fidgetController = OrbFidgetController()
@@ -50,11 +61,17 @@ final class OrbScene {
     setupParticles()
   }
 
+  /// Conversation-tone score (-1...1) from sentiment analysis; tints the mood.
+  func setSentiment(_ score: Float) {
+    affect.setSentiment(score)
+  }
+
   func update(
     time: TimeInterval,
     features: VoiceSessionManager.AudioFeatures,
     speechState: VoiceSessionManager.SpeechState,
     isListening: Bool,
+    isConnectionFailed: Bool,
     rmsOverride: Double?,
     mousePosition: NSPoint?
   ) {
@@ -73,9 +90,52 @@ final class OrbScene {
       smoothedRms += (activeRms - smoothedRms) * min(1.0, deltaTime * 22.0)
     }
 
-    hoverPhase += CGFloat(deltaTime * 3.0)
-    let hover = 0.025 * sin(hoverPhase)
-    let isSpeaking = speechState != .idle || isListening
+    let isIdle = speechState == .idle && !isListening
+    if isIdle {
+      idleDuration += deltaTime
+    } else {
+      idleDuration = 0
+    }
+
+    // --- Emotional spine
+    if speechState != previousSpeechState {
+      switch speechState {
+      case .userSpeaking: affect.apply(event: .userSpoke)
+      case .agentSpeaking: affect.apply(event: .agentSpoke)
+      case .thinking: affect.apply(event: .thinkingStarted)
+      case .idle: break
+      }
+    }
+    if isListening && !previousListening {
+      affect.apply(event: .summoned)
+    }
+    if isConnectionFailed && !previousConnectionFailed {
+      affect.apply(event: .connectionLost)
+      reactionController.trigger(.connectionLost, at: time)
+    }
+    affect.update(
+      deltaTime: deltaTime,
+      speechState: speechState,
+      isListening: isListening,
+      isConnectionFailed: isConnectionFailed,
+      idleTime: idleDuration
+    )
+
+    // Attention budget: fast cursor movement = user is working; don't perform.
+    if let mouse = mousePosition, let last = lastMouseForVelocity {
+      let speed = Float(hypot(mouse.x - last.x, mouse.y - last.y)) / Float(deltaTime)
+      let busyTarget: Float = min(1, speed / 5.0)
+      let rate: Float = busyTarget > busyMeter ? 4.0 : 0.5
+      busyMeter += (busyTarget - busyMeter) * min(1, Float(deltaTime) * rate)
+    }
+    lastMouseForVelocity = mousePosition
+
+    // --- Breathing hover: two detuned sines, rate/depth from arousal.
+    hoverPhase += CGFloat(deltaTime) * CGFloat(affect.breathRate)
+    let breath = sin(hoverPhase) + 0.35 * sin(hoverPhase * 1.7 + 1.3)
+    let hover = CGFloat(affect.breathDepth) * breath
+
+    let isSpeaking = speechState == .userSpeaking || speechState == .agentSpeaking || isListening
     let isUser = speechState == .userSpeaking || isListening
     let multiplier: CGFloat = isUser ? 0.75 : 0.35
     let cap: CGFloat = isUser ? 0.26 : 0.16
@@ -98,9 +158,15 @@ final class OrbScene {
     let ssSpeed = Float(deltaTime * 12.0)
     currentSquashStretch += (targetSS - currentSquashStretch) * ssSpeed
 
-    // Idle fidgets
-    let isIdle = speechState == .idle && !isListening
-    let fidget = fidgetController.update(deltaTime: deltaTime, isIdle: isIdle, currentTime: time)
+    // Idle fidgets — energy from affect, suppressed while the user is busy.
+    let fidget = fidgetController.update(
+      deltaTime: deltaTime,
+      isIdle: isIdle,
+      currentTime: time,
+      energy: affect.fidgetEnergy,
+      suppression: busyMeter,
+      reduceMotion: reduceMotion
+    )
 
     orbNode.scale = SCNVector3(
       currentSquashStretch.x,
@@ -119,91 +185,7 @@ final class OrbScene {
       CGFloat(fidget.rotationOffset.z)
     )
 
-    let targetColor: SIMD3<Double>
-    switch speechState {
-    case .agentSpeaking:
-      targetColor = SIMD3(0.2, 0.55, 1.0)
-    case .userSpeaking:
-      targetColor = SIMD3(1.0, 0.25, 0.25)
-    case .idle:
-      targetColor = isListening ? SIMD3(1.0, 0.25, 0.25) : SIMD3(0.2, 0.95, 0.55)
-    }
-
-    let colorLerp = min(1.0, deltaTime * 5.5)
-    currentColor = lerp(current: currentColor, target: targetColor, amount: colorLerp)
-    let baseColor = NSColor(
-      calibratedRed: currentColor.x,
-      green: currentColor.y,
-      blue: currentColor.z,
-      alpha: 1.0
-    )
-    let glowBoost = CGFloat(min(1.0, 0.25 + (smoothedRms * 1.1)))
-    orbNode.geometry?.firstMaterial?.diffuse.contents = baseColor
-    orbNode.geometry?.firstMaterial?.emission.contents = baseColor.withAlphaComponent(glowBoost)
-
-    let targetLightColor: SIMD3<Double>
-    switch speechState {
-    case .userSpeaking:
-      targetLightColor = SIMD3(1.0, 0.25, 0.25)
-    case .agentSpeaking:
-      targetLightColor = SIMD3(0.2, 0.55, 1.0)
-    case .idle:
-      targetLightColor = isListening ? SIMD3(1.0, 0.25, 0.25) : SIMD3(0.2, 0.95, 0.55)
-    }
-    currentLightColor = lerp(current: currentLightColor, target: targetLightColor, amount: colorLerp)
-    let lightColor = NSColor(
-      calibratedRed: currentLightColor.x,
-      green: currentLightColor.y,
-      blue: currentLightColor.z,
-      alpha: 1.0
-    )
-    keyLightNode.light?.color = lightColor
-    rimLightNode.light?.color = lightColor
-
-    // Determine eye expression from state
-    if isIdle {
-      idleDuration += deltaTime
-    } else {
-      idleDuration = 0
-    }
-
-    let eyeExpression: OrbEyes.Expression
-    if isListening && !previousListening {
-      eyeExpression = .wide
-    } else if speechState == .userSpeaking {
-      eyeExpression = .wide
-    } else if speechState == .agentSpeaking {
-      eyeExpression = .squint
-    } else if idleDuration > 10.0 {
-      eyeExpression = .drowsy
-    } else {
-      eyeExpression = .neutral
-    }
-
-    // Use fidget gaze override if present, otherwise mouse position
-    let effectiveMousePosition: NSPoint?
-    if let gazeOverride = fidget.eyeGazeOverride {
-      let s = CGFloat(OrbEyes.maxPupilOffset)
-      effectiveMousePosition = NSPoint(
-        x: CGFloat(gazeOverride.x) / s,
-        y: CGFloat(gazeOverride.y) / s
-      )
-    } else {
-      effectiveMousePosition = mousePosition
-    }
-
-    eyes.update(
-      deltaTime: deltaTime, mousePosition: effectiveMousePosition, expression: eyeExpression)
-
-    face.update(
-      deltaTime: deltaTime,
-      time: time,
-      speechState: speechState,
-      isListening: isListening,
-      eyeExpression: eyeExpression
-    )
-
-    // Detect state transitions and trigger reactions
+    // --- Reactions (before the face, so their expression override lands this frame)
     if speechState != previousSpeechState {
       switch (previousSpeechState, speechState) {
       case (_, .userSpeaking):
@@ -222,15 +204,140 @@ final class OrbScene {
       reactionController.trigger(.summoned, at: time)
     }
 
-    // Apply reaction outputs (additive to fidget)
     let reaction = reactionController.update(currentTime: time)
     if reactionController.isActive {
       orbNode.position.y += CGFloat(reaction.positionOffset.y)
       orbNode.eulerAngles.x += CGFloat(reaction.rotationOffset.x)
+      orbNode.eulerAngles.y += CGFloat(reaction.rotationOffset.y)
+      orbNode.eulerAngles.z += CGFloat(reaction.rotationOffset.z)
       orbNode.scale.x *= CGFloat(reaction.scaleMultiplier)
       orbNode.scale.y *= CGFloat(reaction.scaleMultiplier)
       orbNode.scale.z *= CGFloat(reaction.scaleMultiplier)
     }
+
+    // --- Expression: latched to state (not edge-triggered); reactions may override.
+    let stateExpression: OrbEyes.Expression
+    if affect.isAsleep {
+      stateExpression = .drowsy
+    } else if isListening || speechState == .userSpeaking {
+      stateExpression = .wide
+    } else if speechState == .agentSpeaking {
+      stateExpression = .squint
+    } else if speechState == .thinking {
+      stateExpression = .neutral  // The thoughtful gaze does the acting.
+    } else if affect.lidDroop > 0.3 {
+      stateExpression = .drowsy
+    } else {
+      stateExpression = .neutral
+    }
+    let eyeExpression = reaction.eyeExpression ?? stateExpression
+    if eyeExpression != previousExpression {
+      blinkController.requestBlink()  // Natural blink on expression changes.
+      previousExpression = eyeExpression
+    }
+
+    // --- Gaze: etiquette controller unless a fidget wants the eyes.
+    let gazeMode: OrbGazeController.Mode
+    if affect.isAsleep {
+      gazeMode = .sleepy
+    } else if isListening || speechState == .userSpeaking {
+      gazeMode = .attentive
+    } else if speechState == .agentSpeaking {
+      gazeMode = .conversational
+    } else if speechState == .thinking {
+      gazeMode = .thoughtful
+    } else {
+      gazeMode = .idle
+    }
+
+    let cursor: SIMD2<Float>? = mousePosition.map {
+      SIMD2<Float>(Float($0.x), Float($0.y))
+    }
+    var gazeFrame = gazeController.update(
+      deltaTime: deltaTime, mode: gazeMode, cursor: cursor, arousal: affect.arousal)
+    if let gazeOverride = fidget.eyeGazeOverride {
+      let s = OrbEyes.maxPupilOffset
+      gazeFrame.target = SIMD2<Float>(gazeOverride.x / s, gazeOverride.y / s)
+      gazeFrame.saccade = false
+    }
+    if gazeFrame.saccade {
+      blinkController.requestBlink()
+    }
+
+    let blink = blinkController.update(
+      deltaTime: deltaTime, arousal: affect.arousal, isAsleep: affect.isAsleep)
+
+    eyes.update(
+      deltaTime: deltaTime,
+      gazeTarget: gazeFrame.target,
+      saccade: gazeFrame.saccade,
+      expression: eyeExpression,
+      blink: blink,
+      lidDroop: affect.lidDroop,
+      tempo: affect.tempo
+    )
+
+    thinkingAmount += ((speechState == .thinking ? 1 : 0) - thinkingAmount)
+      * CGFloat(min(1.0, deltaTime * 5.0))
+
+    face.update(
+      deltaTime: deltaTime,
+      time: time,
+      speechState: speechState,
+      isListening: isListening,
+      eyeExpression: eyeExpression,
+      rms: CGFloat(smoothedRms),
+      zcr: CGFloat(features.zcr),
+      sadness: CGFloat(affect.browSadness),
+      thinking: thinkingAmount,
+      energy: CGFloat(affect.fidgetEnergy)
+    )
+
+    // --- Body color: state hue × mood brightness. Amber = attention (not red),
+    // violet = pondering, slate = lost connection.
+    var targetColor: SIMD3<Double>
+    switch speechState {
+    case .agentSpeaking:
+      targetColor = SIMD3(0.2, 0.55, 1.0)
+    case .userSpeaking:
+      targetColor = SIMD3(1.0, 0.62, 0.18)
+    case .thinking:
+      targetColor = SIMD3(0.58, 0.42, 0.98)
+    case .idle:
+      targetColor = isListening ? SIMD3(1.0, 0.62, 0.18) : SIMD3(0.2, 0.95, 0.55)
+    }
+    if isConnectionFailed {
+      targetColor = SIMD3(0.5, 0.45, 0.55)
+    }
+    targetColor *= Double(affect.moodBrightness)
+    if affect.isAsleep {
+      targetColor *= 0.55
+    }
+
+    let colorLerp = min(1.0, deltaTime * 5.5)
+    currentColor = lerp(current: currentColor, target: targetColor, amount: colorLerp)
+    let baseColor = NSColor(
+      calibratedRed: currentColor.x,
+      green: currentColor.y,
+      blue: currentColor.z,
+      alpha: 1.0
+    )
+    var glowBoost = CGFloat(min(1.0, 0.25 + (smoothedRms * 1.1)))
+    if affect.isAsleep {
+      glowBoost = 0.12
+    }
+    orbNode.geometry?.firstMaterial?.diffuse.contents = baseColor
+    orbNode.geometry?.firstMaterial?.emission.contents = baseColor.withAlphaComponent(glowBoost)
+
+    currentLightColor = lerp(current: currentLightColor, target: targetColor, amount: colorLerp)
+    let lightColor = NSColor(
+      calibratedRed: currentLightColor.x,
+      green: currentLightColor.y,
+      blue: currentLightColor.z,
+      alpha: 1.0
+    )
+    keyLightNode.light?.color = lightColor
+    rimLightNode.light?.color = lightColor
 
     // Modulate particles
     if let ps = particleSystem {
@@ -238,18 +345,21 @@ final class OrbScene {
       switch speechState {
       case .userSpeaking: targetBirthRate = 8
       case .agentSpeaking: targetBirthRate = 12
+      case .thinking: targetBirthRate = 6
       case .idle: targetBirthRate = isListening ? 5 : 2
       }
-      ps.birthRate = targetBirthRate
+      ps.birthRate = affect.isAsleep ? 0.5 : targetBirthRate
       ps.particleColor = baseColor.withAlphaComponent(0.7)
     }
 
     // Track state for transition detection
     previousSpeechState = speechState
     previousListening = isListening
+    previousConnectionFailed = isConnectionFailed
   }
 
   func triggerDismissed() {
+    affect.apply(event: .dismissed)
     reactionController.trigger(.dismissed, at: previousTime)
   }
 

@@ -30,16 +30,26 @@ final class OrbFaceFeatures {
     applyBlackBrows()
   }
 
+  /// - Parameters:
+  ///   - rms/zcr: smoothed output-audio features; drive the brows while the agent talks.
+  ///   - sadness: 0...1 from negative valence — inner corners up, overall droop.
+  ///   - thinking: 0...1 — brow knit while pondering.
+  ///   - energy: affect arousal; scales idle wander amplitude.
   func update(
     deltaTime: TimeInterval,
     time: TimeInterval,
     speechState: VoiceSessionManager.SpeechState,
     isListening: Bool,
-    eyeExpression: OrbEyes.Expression
+    eyeExpression: OrbEyes.Expression,
+    rms: CGFloat,
+    zcr: CGFloat,
+    sadness: CGFloat,
+    thinking: CGFloat,
+    energy: CGFloat
   ) {
     let dt = CGFloat(min(deltaTime, 1.0 / 30.0))
     let isIdle = speechState == .idle && !isListening
-    let idleAmp: CGFloat = isIdle ? 1.0 : 0.38
+    let idleAmp: CGFloat = (isIdle ? 1.0 : 0.38) * (0.45 + 0.75 * energy)
 
     // --- Expression: exaggerated base poses + intentional asymmetry
     var lift: CGFloat = 0.018
@@ -92,9 +102,16 @@ final class OrbFaceFeatures {
       leftZ -= 0.03
       rightZ += 0.03
     case .agentSpeaking:
+      // Audio-driven: loudness lifts the brows, sibilance flutters them.
       lift -= 0.008
       leftZ += 0.025
       rightZ -= 0.025
+      lift += rms * 0.035
+      let flutter = sin(time * 13.0) * zcr * 0.05
+      leftZ -= flutter
+      rightZ += flutter
+    case .thinking:
+      break  // Handled by the knit pose below.
     case .idle:
       break
     }
@@ -103,6 +120,16 @@ final class OrbFaceFeatures {
       leftZ -= 0.06
       rightZ += 0.06
     }
+
+    // Thinking knit: inner ends pinch up-and-in while pondering.
+    lift -= 0.005 * thinking
+    leftZ += 0.11 * thinking
+    rightZ -= 0.11 * thinking
+
+    // Sadness (negative valence): same family as drowsy but heavier — inner up, body down.
+    lift -= 0.008 * sadness
+    leftZ += 0.14 * sadness
+    rightZ -= 0.14 * sadness
 
     let engaged = CGFloat(isIdle ? 1.0 : 0.65)
     smileCurvatureSmoothed += (engaged - smileCurvatureSmoothed) * dt * 5.0

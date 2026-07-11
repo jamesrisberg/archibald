@@ -22,6 +22,8 @@ final class VoiceSessionManager: ObservableObject {
     case idle
     case userSpeaking
     case agentSpeaking
+    /// User's turn is over, response not yet audible — the orb should visibly think.
+    case thinking
   }
 
   @Published private(set) var speechState: SpeechState = .idle
@@ -77,6 +79,9 @@ final class VoiceSessionManager: ObservableObject {
   private var userSpeechStartCandidateAt: Date?
   private var userSpeechStopCandidateAt: Date?
   private var agentSpeechActive = false
+  /// Turn committed / response promised, but no audio yet → speechState .thinking.
+  private var awaitingResponse = false
+  private var awaitingResponseTimeout: DispatchWorkItem?
   private var scheduledAudioBuffers = 0
   private var lastAudioDeltaAt = Date.distantPast
   private var playbackMonitor: DispatchSourceTimer?
@@ -329,6 +334,7 @@ final class VoiceSessionManager: ObservableObject {
     switch type {
     case "response.output_audio.delta":
       if let delta = json["delta"] as? String {
+        setAwaitingResponse(false)
         isPlayingResponse = true
         lastAudioDeltaAt = Date()
         startPlaybackMonitor()
@@ -337,7 +343,8 @@ final class VoiceSessionManager: ObservableObject {
     case "input_audio_buffer.speech_started":
       break
     case "input_audio_buffer.speech_stopped":
-      break
+      // Server VAD closed the user's turn — a response is (probably) coming.
+      setAwaitingResponse(true)
     case "input_audio_buffer.committed":
       if pendingResponseCreate {
         pendingResponseCreate = false
@@ -364,6 +371,7 @@ final class VoiceSessionManager: ObservableObject {
         appendTranscript(role: "You", text: transcript)
       }
     case "error":
+      setAwaitingResponse(false)
       if let error = json["error"] as? [String: Any],
         let message = error["message"] as? String
       {
@@ -386,6 +394,7 @@ final class VoiceSessionManager: ObservableObject {
         startAudioCapture()
       }
     case "response.done":
+      setAwaitingResponse(false)
       if isStopping {
         isStopping = false
         hasSentAudio = false
@@ -393,6 +402,7 @@ final class VoiceSessionManager: ObservableObject {
       isPlayingResponse = false
       responseDoneAt = Date()
     case "response.created":
+      setAwaitingResponse(true)
       DispatchQueue.main.async {
         self.lastTranscript = ""
       }
@@ -669,6 +679,9 @@ final class VoiceSessionManager: ObservableObject {
     stopPlaybackMonitor()
     userSpeechActive = false
     agentSpeechActive = false
+    awaitingResponseTimeout?.cancel()
+    awaitingResponseTimeout = nil
+    awaitingResponse = false
     setSpeechState(.idle)
     setIsRecording(false)
   }
@@ -762,6 +775,7 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func onUserSpeechStarted() {
+    setAwaitingResponse(false)
     updateSpeechState(userActive: true, agentActive: agentSpeechActive)
     if agentSpeechActive || isPlayingResponse {
       interruptResponsePlayback()
@@ -776,12 +790,30 @@ final class VoiceSessionManager: ObservableObject {
       nextState = .userSpeaking
     } else if agentActive {
       nextState = .agentSpeaking
+    } else if awaitingResponse {
+      nextState = .thinking
     } else {
       nextState = .idle
     }
     if speechState != nextState {
       setSpeechState(nextState)
     }
+  }
+
+  private func setAwaitingResponse(_ value: Bool) {
+    awaitingResponseTimeout?.cancel()
+    awaitingResponseTimeout = nil
+    if value {
+      // Server hangs shouldn't leave the orb pondering forever.
+      let timeout = DispatchWorkItem { [weak self] in
+        self?.setAwaitingResponse(false)
+      }
+      awaitingResponseTimeout = timeout
+      DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
+    }
+    guard awaitingResponse != value else { return }
+    awaitingResponse = value
+    updateSpeechState(userActive: userSpeechActive, agentActive: agentSpeechActive)
   }
 
   private func interruptResponsePlayback() {
@@ -806,6 +838,7 @@ final class VoiceSessionManager: ObservableObject {
   private func finalizeTurn() {
     guard connectionState == .connected else { return }
     pendingResponseCreate = true
+    setAwaitingResponse(true)
     sendJSON(["type": "input_audio_buffer.commit"])
     scheduleResponseCreateFallback()
   }

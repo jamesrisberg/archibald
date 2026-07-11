@@ -1,4 +1,5 @@
 import Combine
+import NaturalLanguage
 import SceneKit
 import SwiftUI
 
@@ -101,6 +102,7 @@ private struct OrbSceneView: NSViewRepresentable {
     private var latestSpeechState: VoiceSessionManager.SpeechState = .idle
     private var latestListening = false
     private var latestInputLevel: Double = 0
+    private var latestConnectionFailed = false
 
     init(voiceSession: VoiceSessionManager, orbWalkFacing: OrbWalkFacing) {
       self.orbWalkFacing = orbWalkFacing
@@ -133,6 +135,29 @@ private struct OrbSceneView: NSViewRepresentable {
           _ = self
         }
         .store(in: &cancellables)
+
+      voiceSession.$connectionState
+        .receive(on: RunLoop.main)
+        .sink { [weak self] state in
+          self?.latestConnectionFailed = state == .failed
+        }
+        .store(in: &cancellables)
+
+      // Conversation tone → orb mood. Debounced so we score settled text, not every delta.
+      voiceSession.$lastTranscript
+        .debounce(for: .seconds(0.8), scheduler: RunLoop.main)
+        .sink { [weak self] transcript in
+          guard let self, !transcript.isEmpty else { return }
+          self.orbScene.setSentiment(Self.sentimentScore(for: transcript))
+        }
+        .store(in: &cancellables)
+    }
+
+    private static func sentimentScore(for text: String) -> Float {
+      let tagger = NLTagger(tagSchemes: [.sentimentScore])
+      tagger.string = text
+      let (tag, _) = tagger.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore)
+      return Float(tag?.rawValue ?? "0") ?? 0
     }
 
     func updateSize(for orbSize: Double) {
@@ -182,6 +207,7 @@ private struct OrbSceneView: NSViewRepresentable {
         features: latestFeatures,
         speechState: latestSpeechState,
         isListening: latestListening,
+        isConnectionFailed: latestConnectionFailed,
         rmsOverride: rmsOverride,
         mousePosition: mousePosition
       )

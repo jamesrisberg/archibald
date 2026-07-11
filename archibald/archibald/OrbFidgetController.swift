@@ -28,8 +28,20 @@ final class OrbFidgetController {
   private var currentOutput = FidgetOutput()
   private var isInterrupting = false
 
-  func update(deltaTime: TimeInterval, isIdle: Bool, currentTime: TimeInterval) -> FidgetOutput {
-    if !isIdle {
+  /// - Parameters:
+  ///   - energy: affect arousal — picks calmer fidgets and longer gaps when low; 0 = none (asleep).
+  ///   - suppression: 0...1 attention budget — high when the user is busy working;
+  ///     fidgets in peripheral vision steal focus, so we sit still.
+  ///   - reduceMotion: accessibility — damp amplitudes, skip bounces and spins.
+  func update(
+    deltaTime: TimeInterval,
+    isIdle: Bool,
+    currentTime: TimeInterval,
+    energy: Float,
+    suppression: Float,
+    reduceMotion: Bool
+  ) -> FidgetOutput {
+    if !isIdle || energy < 0.08 {
       if activeFidget != nil || currentOutput.hasNonZeroValues {
         isInterrupting = true
         activeFidget = nil
@@ -50,9 +62,13 @@ final class OrbFidgetController {
     // Don't fidget until idle for 3+ seconds
     guard idleTime > 3.0 else { return currentOutput }
 
-    // If no active fidget and cooldown expired, start one
+    // If no active fidget and cooldown expired, start one — unless the user is busy.
     if activeFidget == nil && fidgetCooldown <= 0 {
-      startRandomFidget(at: currentTime)
+      if suppression > 0.5 {
+        fidgetCooldown = 2.0  // Re-check shortly; stay still for now.
+      } else {
+        startRandomFidget(at: currentTime, energy: energy, reduceMotion: reduceMotion)
+      }
     }
 
     // Compute current fidget frame
@@ -62,12 +78,18 @@ final class OrbFidgetController {
 
       if t >= 1.0 {
         activeFidget = nil
-        fidgetCooldown = Double.random(in: 5.0...15.0)
+        // Low energy rests longer between fidgets.
+        let gap = Double(1.6 - energy)
+        fidgetCooldown = Double.random(in: 5.0...15.0) * gap
         currentOutput = FidgetOutput()
         return currentOutput
       }
 
-      currentOutput = outputForFidget(fidget, progress: t)
+      var output = outputForFidget(fidget, progress: t)
+      let amplitude = amplitudeScale(energy: energy, reduceMotion: reduceMotion)
+      output.rotationOffset *= amplitude
+      output.positionOffset *= amplitude
+      currentOutput = output
     }
 
     return currentOutput
@@ -75,20 +97,32 @@ final class OrbFidgetController {
 
   // MARK: - Private
 
-  private func startRandomFidget(at time: TimeInterval) {
-    activeFidget = weightedRandomFidget()
+  private func amplitudeScale(energy: Float, reduceMotion: Bool) -> Float {
+    let base = 0.55 + energy * 0.6
+    return reduceMotion ? base * 0.35 : base
+  }
+
+  private func startRandomFidget(at time: TimeInterval, energy: Float, reduceMotion: Bool) {
+    activeFidget = weightedRandomFidget(energy: energy, reduceMotion: reduceMotion)
     fidgetStartTime = time
     fidgetDuration = durationForFidget(activeFidget!)
     fidgetSeed = Float.random(in: -1...1)
   }
 
-  private func weightedRandomFidget() -> Fidget {
+  private func weightedRandomFidget(energy: Float, reduceMotion: Bool) -> Fidget {
     let roll = Double.random(in: 0...1)
+    // Sleepy/calm: only gentle tilts and glances — no bouncing while drowsy.
+    if energy < 0.3 || reduceMotion {
+      if roll < 0.55 { return .microTilt }
+      if roll < 0.85 { return .lookAround }
+      return .curiousTilt
+    }
+    // Sprightly: full repertoire, spin reserved for genuinely energized moods.
     if roll < 0.40 { return .microTilt }
     if roll < 0.70 { return .lookAround }
     if roll < 0.85 { return .smallBounce }
     if roll < 0.95 { return .curiousTilt }
-    return .slowSpin
+    return energy > 0.55 ? .slowSpin : .curiousTilt
   }
 
   private func durationForFidget(_ fidget: Fidget) -> TimeInterval {
