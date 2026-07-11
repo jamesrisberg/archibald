@@ -1,5 +1,6 @@
 **/xcuserdata/
 **/*.xcuserstate
 build/
-.env.persist/persist.db-shm
 .persist/persist.db-wal
+.env
+.persist/persist.db-shm
