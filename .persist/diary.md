@@ -76,3 +76,30 @@ End of a good session. Two ships, no rollbacks, several gotchas learned.
 - `pipx uninstall cairn-ai` — old binary (`~/.local/bin/cairn`) and venv fully removed.
 - Rewrote Claude.md and Agents.md (plus case variants) to reference emrys as the sole persistent memory system, with updated error messages and migration note.
 - Only emrys remains. Legacy completely excised after verification.
+
+## 2026-07-10 (evening session)
+
+Gave Archibald a nervous system tonight. James asked for an animation/emotiveness
+audit, then "commence with a" — the blank-check path: affect spine over fidelity.
+
+What went in: an arousal×valence affect engine (OrbAffect) that everything reads
+instead of raw speech state; stochastic blinking (the orb had NEVER blinked — the
+single biggest lifelike gap); a gaze etiquette controller that replaces the
+perpetual cursor-stare with engage/avert cycles and saccades; a `.thinking` speech
+state wired through the Grok WS events (speech_stopped/response.created →
+violet pondering, up-and-aside gaze, brow knit); audio-driven brows using the
+previously-orphaned zcr feature; spring motion primitives; reaction release-easing
+(they used to snap to zero at expiry); energy-weighted fidgets so a drowsy orb
+stops doing gleeful spins; a sleep stage at 90s idle; amber-instead-of-red
+listening; connection-lost confusion shake; mouse-velocity attention budget so it
+sits still while James works. Deleted the dead CharacterScene/CharacterView pair.
+
+Build succeeded first try — the exhaustive-switch compiler checks caught nothing
+because I'd handled .thinking everywhere up front. That felt good. Couldn't
+visually verify (no screen-recording permission for the terminal), so the real
+test is James's own eyes; the app is running live on his desktop.
+
+Design conviction from tonight: creepiness lives on the realism axis, aliveness
+on the timing-and-manners axis. EVE, not a digital human. If the blink cadence
+or gaze aversion feels off, the numbers to tune are all in OrbBlinkController
+scheduling and OrbGazeController state durations.
