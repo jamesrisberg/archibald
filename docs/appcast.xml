@@ -8,6 +8,25 @@
 
     <!-- Add new versions at the top -->
     <item>
+      <title>Version 0.3.1</title>
+      <description><![CDATA[
+        <h2>What&apos;s New in 0.3.1</h2>
+        <ul>
+          <li><strong>Push-to-talk actually works now.</strong> Voice capture uses manual turn detection instead of server VAD, so releasing the button reliably sends what you said instead of sometimes triggering a generic greeting.</li>
+          <li>Empty captures (tap without speaking) no longer ask the agent to respond.</li>
+        </ul>
+      ]]></description>
+      <pubDate>Tue, 14 Jul 2026 12:21:23 +0000</pubDate>
+      <sparkle:version>13</sparkle:version>
+      <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/jamesrisberg/archibald/releases/download/v0.3.1/Archibald.zip"
+        sparkle:edSignature="9RpQ81d2n0BMZ3N8TYbNSQ58jiDZw/ZK45eby58gtOBBOlWiAARRChERG/sOwYPlu7cqjazo4dcDXPhOYJQiBA=="
+        length="2155130"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 0.3.0</title>
       <description><![CDATA[
         <h2>What&apos;s New in 0.3.0 — Archibald is alive</h2>
