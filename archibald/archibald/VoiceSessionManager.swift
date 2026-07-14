@@ -343,10 +343,9 @@ final class VoiceSessionManager: ObservableObject {
     var session: [String: Any] = [
       "voice": settings.voice.apiValue,
       "instructions": settings.systemPrompt,
-      // Hands-free turns rely on the server closing the user's turn
-      // (speech_stopped → response); pin that explicitly instead of
-      // inheriting it as the implicit default.
-      "turn_detection": ["type": "server_vad"],
+      // Push-to-talk: the client commits on button release (finalizeTurn).
+      // server_vad auto-commits on silence and fights manual commit.
+      "turn_detection": NSNull(),
       // Lets a dropped socket reconnect with ?conversation_id= and keep
       // the conversation history (server holds it for 30 min).
       "resumption": ["enabled": true],
@@ -462,8 +461,8 @@ final class VoiceSessionManager: ObservableObject {
     case "input_audio_buffer.speech_started":
       break
     case "input_audio_buffer.speech_stopped":
-      // Server VAD closed the user's turn — a response is (probably) coming.
-      setAwaitingResponse(true)
+      // Only emitted with server_vad; PTT uses manual commit in finalizeTurn.
+      break
     case "input_audio_buffer.committed":
       if pendingResponseCreate {
         pendingResponseCreate = false
@@ -976,7 +975,7 @@ final class VoiceSessionManager: ObservableObject {
   }
 
   private func finalizeTurn() {
-    guard connectionState == .connected else { return }
+    guard connectionState == .connected, hasSentAudio else { return }
     pendingResponseCreate = true
     setAwaitingResponse(true)
     sendJSON(["type": "input_audio_buffer.commit"])
